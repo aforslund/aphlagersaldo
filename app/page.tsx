@@ -1,0 +1,473 @@
+'use client'
+
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Papa from 'papaparse'
+import type { StockCheckResponse, ProductStockResult } from '@/types'
+
+export default function StockCheckerPage() {
+  const [psids, setPsids] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [results, setResults] = useState<ProductStockResult[]>([])
+  const [errors, setErrors] = useState<string[]>([])
+  const [showOkResults, setShowOkResults] = useState(false)
+  const [skipGoogleFeed, setSkipGoogleFeed] = useState(false)
+  const [skipNyce, setSkipNyce] = useState(false)
+  const [nyceCsvData, setNyceCsvData] = useState<any>(null)
+  const router = useRouter()
+
+  const handlePsidFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    Papa.parse(file, {
+      complete: (results) => {
+        // Extract PSIDs from CSV (assuming they're in the first column or as single values)
+        const psidList: string[] = []
+        results.data.forEach((row: any) => {
+          if (Array.isArray(row)) {
+            // If row is an array, take first non-empty value
+            const psid = row.find((cell: string) => cell && cell.trim())
+            if (psid && psid.trim()) psidList.push(psid.trim())
+          } else if (typeof row === 'string' && row.trim()) {
+            psidList.push(row.trim())
+          }
+        })
+        setPsids(psidList.join(', '))
+      },
+      error: (error) => {
+        alert('Error parsing CSV: ' + error.message)
+      },
+    })
+  }
+
+  const handleNyceCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    Papa.parse(file, {
+      header: true,
+      complete: (results) => {
+        const nyceData: any = {}
+        results.data.forEach((row: any) => {
+          if (row.SKU) {
+            nyceData[row.SKU.trim()] = {
+              balance: parseFloat(row.Balance || '0'),
+              inOrder: parseFloat(row.InOrder || '0'),
+            }
+          }
+        })
+        setNyceCsvData(nyceData)
+        alert(`Loaded NYCE data for ${Object.keys(nyceData).length} SKUs`)
+      },
+      error: (error) => {
+        alert('Error parsing NYCE CSV: ' + error.message)
+      },
+    })
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setResults([])
+    setErrors([])
+
+    try {
+      // Parse PSIDs (comma or newline separated)
+      const psidList = psids
+        .split(/[,\n]/)
+        .map(p => p.trim())
+        .filter(p => p.length > 0)
+
+      if (psidList.length === 0) {
+        alert('Please enter at least one PSID')
+        setLoading(false)
+        return
+      }
+
+      const response = await fetch('/api/stock-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          psids: psidList,
+          skipGoogleFeed,
+          skipNyce,
+          nyceCsvData,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to check stock')
+      }
+
+      const data: StockCheckResponse = await response.json()
+      setResults(data.results)
+      setErrors(data.errors)
+    } catch (error) {
+      alert('Error checking stock: ' + error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    router.push('/login')
+    router.refresh()
+  }
+
+  const okResults = results.filter(r => r.status === 'ok')
+  const issueResults = results.filter(r => r.status === 'issue')
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#f3f4f6', padding: '2rem' }}>
+      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+          <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1f2937' }}>
+            Stock Level Checker
+          </h1>
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: '0.5rem 1rem',
+              background: '#ef4444',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: '500'
+            }}
+          >
+            Logout
+          </button>
+        </div>
+
+        {/* Input Form */}
+        <div style={{ background: 'white', padding: '1.5rem', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)', marginBottom: '2rem' }}>
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', color: '#374151' }}>
+                Upload CSV or Enter PSIDs
+              </label>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handlePsidFileUpload}
+                style={{ marginBottom: '1rem', display: 'block' }}
+              />
+              <textarea
+                value={psids}
+                onChange={(e) => setPsids(e.target.value)}
+                placeholder="Enter PSIDs (comma or newline separated)"
+                rows={5}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '4px',
+                  fontSize: '1rem',
+                  fontFamily: 'monospace'
+                }}
+              />
+              <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.5rem' }}>
+                Example: 38454, 3849, 3848 or one per line
+              </p>
+            </div>
+
+            {/* Check Options */}
+            <div style={{ marginBottom: '1.5rem', padding: '1rem', background: '#f9fafb', borderRadius: '4px' }}>
+              <h3 style={{ fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.75rem', color: '#374151' }}>
+                Check Options
+              </h3>
+
+              <label style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={skipGoogleFeed}
+                  onChange={(e) => setSkipGoogleFeed(e.target.checked)}
+                  style={{ marginRight: '0.5rem', cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: '0.875rem', color: '#374151' }}>
+                  Skip Google Feed check (items already known to be unavailable on website)
+                </span>
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={skipNyce}
+                  onChange={(e) => {
+                    setSkipNyce(e.target.checked)
+                    if (e.target.checked) setNyceCsvData(null)
+                  }}
+                  style={{ marginRight: '0.5rem', cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: '0.875rem', color: '#374151' }}>
+                  Skip NYCE check (only check CommerceTools and Fluent)
+                </span>
+              </label>
+
+              {!skipNyce && (
+                <div style={{ marginLeft: '1.5rem', marginTop: '0.5rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.875rem', color: '#374151', marginBottom: '0.5rem' }}>
+                    Upload NYCE CSV (optional - use if API unavailable)
+                  </label>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleNyceCsvUpload}
+                    style={{ fontSize: '0.875rem' }}
+                  />
+                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                    CSV format: SKU, Balance, InOrder
+                  </p>
+                  {nyceCsvData && (
+                    <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: '#d1fae5', borderRadius: '4px', fontSize: '0.75rem', color: '#065f46' }}>
+                      ✓ NYCE CSV loaded ({Object.keys(nyceCsvData).length} SKUs)
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: loading ? '#9ca3af' : '#667eea',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                fontSize: '1rem',
+                fontWeight: '500',
+                cursor: loading ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {loading ? 'Checking...' : 'Check Stock Levels'}
+            </button>
+          </form>
+        </div>
+
+        {/* Errors */}
+        {errors.length > 0 && (
+          <div style={{
+            background: '#fee2e2',
+            border: '1px solid #fca5a5',
+            borderRadius: '8px',
+            padding: '1rem',
+            marginBottom: '2rem'
+          }}>
+            <h3 style={{ fontWeight: 'bold', color: '#991b1b', marginBottom: '0.5rem' }}>Errors:</h3>
+            <ul style={{ listStyle: 'disc', paddingLeft: '1.5rem', color: '#991b1b' }}>
+              {errors.map((error, i) => (
+                <li key={i}>{error}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Results */}
+        {results.length > 0 && (
+          <div>
+            {/* Summary */}
+            <div style={{
+              background: 'white',
+              padding: '1rem',
+              borderRadius: '8px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+              marginBottom: '1rem',
+              display: 'flex',
+              gap: '2rem'
+            }}>
+              <div>
+                <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>Total Checked:</span>
+                <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem' }}>{results.length}</span>
+              </div>
+              <div>
+                <span style={{ fontSize: '0.875rem', color: '#10b981' }}>OK:</span>
+                <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem', color: '#10b981' }}>{okResults.length}</span>
+              </div>
+              <div>
+                <span style={{ fontSize: '0.875rem', color: '#ef4444' }}>Issues:</span>
+                <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem', color: '#ef4444' }}>{issueResults.length}</span>
+              </div>
+            </div>
+
+            {/* OK Results (Collapsible) */}
+            {okResults.length > 0 && (
+              <div style={{
+                background: 'white',
+                borderRadius: '8px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                marginBottom: '1rem',
+                overflow: 'hidden'
+              }}>
+                <button
+                  onClick={() => setShowOkResults(!showOkResults)}
+                  style={{
+                    width: '100%',
+                    padding: '1rem',
+                    background: '#d1fae5',
+                    border: 'none',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                    color: '#065f46',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                >
+                  <span>OK Items ({okResults.length})</span>
+                  <span>{showOkResults ? '▼' : '►'}</span>
+                </button>
+                {showOkResults && (
+                  <div style={{ padding: '1rem' }}>
+                    {okResults.map((result, i) => (
+                      <ResultCard key={i} result={result} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Issue Results */}
+            {issueResults.length > 0 && (
+              <div>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1rem', color: '#ef4444' }}>
+                  Items Requiring Attention
+                </h2>
+                {issueResults.map((result, i) => (
+                  <ResultCard key={i} result={result} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ResultCard({ result }: { result: ProductStockResult }) {
+  const isOk = result.status === 'ok'
+
+  return (
+    <div style={{
+      background: 'white',
+      border: `2px solid ${isOk ? '#10b981' : '#ef4444'}`,
+      borderRadius: '8px',
+      padding: '1.5rem',
+      marginBottom: '1rem',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+    }}>
+      {/* Header */}
+      <div style={{ marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.5rem' }}>
+          <div>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937' }}>
+              {result.psid}
+            </h3>
+            <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>{result.productName}</p>
+          </div>
+          <span style={{
+            padding: '0.25rem 0.75rem',
+            background: isOk ? '#d1fae5' : '#fee2e2',
+            color: isOk ? '#065f46' : '#991b1b',
+            borderRadius: '9999px',
+            fontSize: '0.75rem',
+            fontWeight: '600'
+          }}>
+            {result.status.toUpperCase()}
+          </span>
+        </div>
+      </div>
+
+      {/* Stock Levels */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+        gap: '1rem',
+        marginBottom: '1rem',
+        padding: '1rem',
+        background: '#f9fafb',
+        borderRadius: '4px'
+      }}>
+        <div>
+          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>Google Feed</div>
+          <div style={{ fontWeight: 'bold', color: result.googleSellable === null ? '#6b7280' : (result.googleSellable ? '#10b981' : '#ef4444') }}>
+            {result.googleSellable === null ? 'SKIPPED' : (result.googleSellable ? 'SELLABLE' : 'NOT SELLABLE')}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>CommerceTools</div>
+          <div style={{ fontWeight: 'bold', color: result.commerceToolsStock > 0 ? '#10b981' : '#ef4444' }}>
+            {result.commerceToolsStock}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>Fluent</div>
+          <div style={{ fontWeight: 'bold', color: result.fluentStock > 0 ? '#10b981' : '#ef4444' }}>
+            {result.fluentStock}
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>NYCE OnHand</div>
+          <div style={{ fontWeight: 'bold', color: (result.nyceStock?.onHandQty || 0) > 0 ? '#10b981' : '#ef4444' }}>
+            {result.nyceStock?.onHandQty || 0}
+          </div>
+        </div>
+      </div>
+
+      {/* Analysis */}
+      {result.analysis && (
+        <div style={{
+          padding: '1rem',
+          background: isOk ? '#ecfdf5' : '#fef2f2',
+          borderLeft: `4px solid ${isOk ? '#10b981' : '#ef4444'}`,
+          marginBottom: '1rem'
+        }}>
+          <div style={{ fontWeight: '600', marginBottom: '0.5rem', color: '#1f2937' }}>Analysis:</div>
+          <div style={{ color: '#374151' }}>{result.analysis}</div>
+        </div>
+      )}
+
+      {/* Details */}
+      {result.details.length > 0 && (
+        <div>
+          <div style={{ fontWeight: '600', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#1f2937' }}>
+            Details:
+          </div>
+          <ul style={{ listStyle: 'disc', paddingLeft: '1.5rem', fontSize: '0.875rem', color: '#374151' }}>
+            {result.details.map((detail, i) => (
+              <li key={i} style={{ marginBottom: '0.25rem' }}>{detail}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* NYCE Details */}
+      {result.nyceStock && (
+        <div style={{
+          marginTop: '1rem',
+          padding: '1rem',
+          background: '#f9fafb',
+          borderRadius: '4px',
+          fontSize: '0.875rem'
+        }}>
+          <div style={{ fontWeight: '600', marginBottom: '0.5rem', color: '#1f2937' }}>NYCE Stock Details:</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.5rem' }}>
+            <div><span style={{ color: '#6b7280' }}>Physical:</span> <strong>{result.nyceStock.physicalQty}</strong></div>
+            <div><span style={{ color: '#6b7280' }}>OnHand:</span> <strong>{result.nyceStock.onHandQty}</strong></div>
+            <div><span style={{ color: '#6b7280' }}>InOrder:</span> <strong>{result.nyceStock.inOrderQty}</strong></div>
+            <div><span style={{ color: '#6b7280' }}>Stopped:</span> <strong>{result.nyceStock.stoppedQty}</strong></div>
+            <div><span style={{ color: '#6b7280' }}>Allocated:</span> <strong>{result.nyceStock.allocatedQty}</strong></div>
+            <div><span style={{ color: '#6b7280' }}>Available:</span> <strong>{result.nyceStock.onHandQty - result.nyceStock.inOrderQty}</strong></div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

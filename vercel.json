@@ -1,0 +1,21 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": ".next",
+  "framework": "nextjs",
+  "env": {
+    "ACCESS_PASSWORD": "@access-password",
+    "FLUENT_ENDPOINT": "@fluent-endpoint",
+    "FLUENT_USERNAME": "@fluent-username",
+    "FLUENT_PASSWORD": "@fluent-password",
+    "FLUENT_CLIENT_ID": "@fluent-client-id",
+    "FLUENT_CLIENT_SECRET": "@fluent-client-secret",
+    "FLUENT_LOCATION_REF": "@fluent-location-ref",
+    "NYCE_BASE_URL": "@nyce-base-url",
+    "NYCE_USERNAME": "@nyce-username",
+    "NYCE_PASSWORD": "@nyce-password",
+    "NYCE_CLIENT": "@nyce-client",
+    "NYCE_WAREHOUSE": "@nyce-warehouse",
+    "NEXT_PUBLIC_GOOGLE_FEED_URL": "https://www.apotekhjartat.se/api/feeds/products",
+    "NEXT_PUBLIC_AUTOCOMPLETE_URL": "https://www.apotekhjartat.se/api/autocomplete"
+  }
+}

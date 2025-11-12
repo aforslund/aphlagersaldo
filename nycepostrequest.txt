@@ -1,0 +1,69 @@
+https:/ /nyce-app01.test.nyce.aph.icacorp.net/api/custom/itembalance
+Add Authorization: Bearer <token> which is fetched from 1. Authenticate
+{
+"skus": [
+"38454",
+"3849",
+"3848",
+"4328717"
+]
+}
+
+Response example for itembalance
+{
+"dataProduct": {
+"name": "wms_stock_balance_change",
+"description": "Warehouse Management System stock snapshot and item details.",
+"dataClassification": {
+"confidentiality": "S3",
+"integrity": "R2",
+"availability": "S3",
+"customer": "S3"
+},
+"informationOwner": null,
+"schemaRegistryEntry": {
+"artifactId": "wms_stock_response",
+"apiUrl": "https.gw.api.azure.icacorp.net/sverige/isb/schemaregistry/apicurio/v2"
+},
+"refreshInterval": "triggered",
+"creationDate": "2025-10-30T08:39:40.1321888Z"
+},
+"generatedAt": "2025-10-30T08:39:40.0780446Z",
+"warehouse": "EHL",
+"storeId": "1186",
+"articles": [{
+"articleId": "4328717",
+"unitOfMeasureArticleStockBalance": "EA",
+"updatedAt": "2025-10-15T17:34:34.94",
+"articleLocationId1": null,
+"articleLocationId2": null,
+"physicalQty": 1000,
+"onHandQty": 1000,
+"inOrderQty": 0,
+"allocatedQty": 0,
+"stoppedQty": 0,
+"availableQty": null,
+"reservedQty": null,
+"digitalSellableQty": null
+}
+]
+}
+
+Password: ApiTest123
+1 Authenticate
+https:/ /nyce-app01.test.nyce.aph.icacorp.net/api/authenticate
+Post-request to fetch active token
+{
+"userName": "extapiuser",
+"password": Write to Sebastian Hallman on Teams. We can set a new password which you can store
+somewhere safe.
+"client": "APH",
+"warehouse": "NRKPG2"
+}
+In the response, you will get a bearerToken you can authenticate towards NYCE
+custom API
+{
+}
+"token": "string"
+Tokens expiration is 24 hours so if you receive, 401 (unauthorized) you can send a
+new post request to fetch new token
