@@ -33,8 +33,8 @@ async function getFluentInventoryForProducts(
 ): Promise<Map<string, number>> {
   // Query Fluent for each PSID individually - much faster and more targeted
   const query = `
-    query inventoryPositions($locationRef: String!, $productRef: String!) {
-      inventoryPositions(first: 1, locationRef: $locationRef, productRef: $productRef) {
+    query inventoryPositions($locationRefs: [String], $productRefs: [String!]) {
+      inventoryPositions(first: 1, locationRef: $locationRefs, productRef: $productRefs) {
         edges {
           node {
             productRef
@@ -60,8 +60,8 @@ async function getFluentInventoryForProducts(
         body: JSON.stringify({
           query,
           variables: {
-            locationRef: locationRef,
-            productRef: psid,
+            locationRefs: [locationRef],
+            productRefs: [psid],
           },
         }),
       })
