@@ -27,7 +27,7 @@ async function getFluentToken(): Promise<string> {
   return data.access_token
 }
 
-// Helper to get Fluent inventory
+// Helper to get Fluent inventory (all items - for Full Check)
 async function getFluentInventory(token: string, locationRef: string): Promise<Map<string, number>> {
   const query = `
     query inventoryPositions($locationRefs:[String], $cursor: String) {
@@ -80,6 +80,52 @@ async function getFluentInventory(token: string, locationRef: string): Promise<M
 
     hasNextPage = data.data.inventoryPositions.pageInfo.hasNextPage
   }
+
+  return inventoryMap
+}
+
+// Helper to get Fluent inventory for specific PSIDs only (faster for spot-checks)
+async function getFluentInventoryForProducts(token: string, locationRef: string, psids: string[]): Promise<Map<string, number>> {
+  const query = `
+    query inventoryPositions($locationRefs:[String], $productRefs:[String]) {
+      inventoryPositions(first: 100, locationRef: $locationRefs, productRef: $productRefs) {
+        edges {
+          node {
+            locationRef
+            productRef
+            onHand
+          }
+        }
+      }
+    }`
+
+  const inventoryMap = new Map<string, number>()
+
+  const response = await fetch(process.env.FLUENT_ENDPOINT!, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query,
+      variables: {
+        locationRefs: [locationRef],
+        productRefs: psids,
+      },
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch Fluent inventory')
+  }
+
+  const data = await response.json()
+  const edges = data.data.inventoryPositions.edges
+
+  edges.forEach((edge: { node: FluentInventoryNode; cursor: string }) => {
+    inventoryMap.set(edge.node.productRef, edge.node.onHand)
+  })
 
   return inventoryMap
 }
@@ -395,45 +441,50 @@ export async function POST(request: NextRequest) {
     }
     // SPOT-CHECK MODE: Only check Autocomplete and Fluent
     else {
-      // Get Fluent inventory
+      // Get Fluent inventory for ONLY the specific PSIDs (much faster!)
       let fluentMap: Map<string, number>
       try {
         const fluentToken = await getFluentToken()
-        fluentMap = await getFluentInventory(fluentToken, process.env.FLUENT_LOCATION_REF!)
+        fluentMap = await getFluentInventoryForProducts(fluentToken, process.env.FLUENT_LOCATION_REF!, psids)
       } catch (error) {
         errors.push('Failed to fetch Fluent inventory')
         fluentMap = new Map()
       }
 
-      // Process each PSID
-      for (const psid of psids) {
-        try {
-          await new Promise(resolve => setTimeout(resolve, 100))
+      // Process PSIDs in parallel batches for speed
+      const batchSize = 5
+      for (let i = 0; i < psids.length; i += batchSize) {
+        const batch = psids.slice(i, i + batchSize)
 
-          // Get autocomplete data
-          const autocompleteUrl = `${process.env.NEXT_PUBLIC_AUTOCOMPLETE_URL}?language=sv-SE&q=${psid}`
-          const autocompleteResponse = await fetch(autocompleteUrl)
-          const autocompleteData: AutocompleteResponse = await autocompleteResponse.json()
+        const batchPromises = batch.map(async (psid) => {
+          try {
+            // Get autocomplete data
+            const autocompleteUrl = `${process.env.NEXT_PUBLIC_AUTOCOMPLETE_URL}?language=sv-SE&q=${psid}`
+            const autocompleteResponse = await fetch(autocompleteUrl)
+            const autocompleteData: AutocompleteResponse = await autocompleteResponse.json()
 
-          const matchedProduct = autocompleteData.products.find(
-            p => p.variant && p.variant.sku === psid
-          )
+            const matchedProduct = autocompleteData.products.find(
+              p => p.variant && p.variant.sku === psid
+            )
 
-          const productName = matchedProduct?.productName || 'Unknown Product'
-          const commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
-          const fluentStock = fluentMap.get(psid) || 0
+            const productName = matchedProduct?.productName || 'Unknown Product'
+            const commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
+            const fluentStock = fluentMap.get(psid) || 0
 
-          const result = analyzeStockSpot(
-            psid,
-            productName,
-            commerceToolsStock,
-            fluentStock
-          )
+            return analyzeStockSpot(
+              psid,
+              productName,
+              commerceToolsStock,
+              fluentStock
+            )
+          } catch (error) {
+            errors.push(`Failed to process PSID ${psid}: ${error}`)
+            return null
+          }
+        })
 
-          results.push(result)
-        } catch (error) {
-          errors.push(`Failed to process PSID ${psid}: ${error}`)
-        }
+        const batchResults = await Promise.all(batchPromises)
+        results.push(...batchResults.filter(r => r !== null) as ProductStockResult[])
       }
     }
 
