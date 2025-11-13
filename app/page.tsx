@@ -72,23 +72,39 @@ export default function StockCheckerPage() {
     setErrors([])
 
     try {
-      // Parse PSIDs (comma or newline separated)
-      const psidList = psids
-        .split(/[,\n]/)
-        .map(p => p.trim())
-        .filter(p => p.length > 0)
-
-      if (psidList.length === 0) {
-        alert('Please enter at least one PSID')
-        setLoading(false)
-        return
-      }
-
       // Validate Full Check mode requires NYCE CSV
       if (checkMode === 'full' && !nyceCsvData) {
         alert('Full Check mode requires NYCE CSV upload')
         setLoading(false)
         return
+      }
+
+      let psidList: string[] = []
+
+      // For Full Check, PSIDs come from NYCE CSV (optional manual entry to filter)
+      if (checkMode === 'full') {
+        if (psids.trim()) {
+          // If PSIDs entered, use only those (filtered subset)
+          psidList = psids
+            .split(/[,\n]/)
+            .map(p => p.trim())
+            .filter(p => p.length > 0)
+        } else {
+          // Otherwise, use all PSIDs from NYCE CSV
+          psidList = Object.keys(nyceCsvData!)
+        }
+      } else {
+        // For Spot-check, PSIDs are required
+        psidList = psids
+          .split(/[,\n]/)
+          .map(p => p.trim())
+          .filter(p => p.length > 0)
+
+        if (psidList.length === 0) {
+          alert('Please enter at least one PSID for Spot-check mode')
+          setLoading(false)
+          return
+        }
       }
 
       const response = await fetch('/api/stock-check', {
@@ -153,18 +169,22 @@ export default function StockCheckerPage() {
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', color: '#374151' }}>
-                Upload CSV or Enter PSIDs
+                {checkMode === 'spot' ? 'Upload CSV or Enter PSIDs (Required)' : 'Filter PSIDs (Optional)'}
               </label>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={handlePsidFileUpload}
-                style={{ marginBottom: '1rem', display: 'block' }}
-              />
+              {checkMode === 'spot' && (
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handlePsidFileUpload}
+                  style={{ marginBottom: '1rem', display: 'block' }}
+                />
+              )}
               <textarea
                 value={psids}
                 onChange={(e) => setPsids(e.target.value)}
-                placeholder="Enter PSIDs (comma or newline separated)"
+                placeholder={checkMode === 'spot'
+                  ? "Enter PSIDs (comma or newline separated)"
+                  : "Optional: Enter specific PSIDs to check (leave empty to check all from NYCE CSV)"}
                 rows={5}
                 style={{
                   width: '100%',
@@ -172,11 +192,14 @@ export default function StockCheckerPage() {
                   border: '1px solid #d1d5db',
                   borderRadius: '4px',
                   fontSize: '1rem',
-                  fontFamily: 'monospace'
+                  fontFamily: 'monospace',
+                  background: checkMode === 'full' ? '#f9fafb' : 'white'
                 }}
               />
               <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                Example: 38454, 3849, 3848 or one per line
+                {checkMode === 'spot'
+                  ? 'Example: 38454, 3849, 3848 or one per line'
+                  : `Full Check: Leave empty to check all ${nyceCsvData ? Object.keys(nyceCsvData).length : '0'} items from NYCE CSV`}
               </p>
             </div>
 
@@ -222,7 +245,7 @@ export default function StockCheckerPage() {
                     Full Check
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                    Complete analysis: Google Feed → NYCE → Fluent → Autocomplete (NYCE CSV required)
+                    Automatically checks all items from NYCE CSV that are NOT sellable in Google Feed
                   </div>
                 </div>
               </label>

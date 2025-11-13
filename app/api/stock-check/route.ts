@@ -333,17 +333,18 @@ export async function POST(request: NextRequest) {
   try {
     const { psids, checkMode, nyceCsvData }: StockCheckRequest = await request.json()
 
-    if (!psids || psids.length === 0) {
-      return NextResponse.json(
-        { error: 'No PSIDs provided' },
-        { status: 400 }
-      )
-    }
-
     // Validate Full Check mode requirements
     if (checkMode === 'full' && !nyceCsvData) {
       return NextResponse.json(
         { error: 'Full Check mode requires NYCE CSV data' },
+        { status: 400 }
+      )
+    }
+
+    // Validate Spot-check mode requirements
+    if (checkMode === 'spot' && (!psids || psids.length === 0)) {
+      return NextResponse.json(
+        { error: 'Spot-check mode requires PSIDs' },
         { status: 400 }
       )
     }
