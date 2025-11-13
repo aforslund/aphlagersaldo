@@ -11,6 +11,9 @@ export default function StockCheckerPage() {
   const [results, setResults] = useState<ProductStockResult[]>([])
   const [errors, setErrors] = useState<string[]>([])
   const [showOkResults, setShowOkResults] = useState(false)
+  const [progressMessage, setProgressMessage] = useState('')
+  const [progressCurrent, setProgressCurrent] = useState(0)
+  const [progressTotal, setProgressTotal] = useState(0)
   const [checkMode, setCheckMode] = useState<'full' | 'spot'>('spot')
   const [nyceCsvData, setNyceCsvData] = useState<any>(null)
   const router = useRouter()
@@ -70,6 +73,9 @@ export default function StockCheckerPage() {
     setLoading(true)
     setResults([])
     setErrors([])
+    setProgressMessage('Initializing...')
+    setProgressCurrent(0)
+    setProgressTotal(0)
 
     try {
       // Validate Full Check mode requires NYCE CSV
@@ -84,13 +90,11 @@ export default function StockCheckerPage() {
       // For Full Check, PSIDs come from NYCE CSV (optional manual entry to filter)
       if (checkMode === 'full') {
         if (psids.trim()) {
-          // If PSIDs entered, use only those (filtered subset)
           psidList = psids
             .split(/[,\n]/)
             .map(p => p.trim())
             .filter(p => p.length > 0)
         } else {
-          // Otherwise, use all PSIDs from NYCE CSV
           psidList = Object.keys(nyceCsvData!)
         }
       } else {
@@ -107,7 +111,10 @@ export default function StockCheckerPage() {
         }
       }
 
-      const response = await fetch('/api/stock-check', {
+      setProgressTotal(psidList.length)
+
+      // Use streaming endpoint for real-time updates
+      const response = await fetch('/api/stock-check-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -121,13 +128,47 @@ export default function StockCheckerPage() {
         throw new Error('Failed to check stock')
       }
 
-      const data: StockCheckResponse = await response.json()
-      setResults(data.results)
-      setErrors(data.errors)
+      // Read streaming response
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      const tempResults: ProductStockResult[] = []
+      const tempErrors: string[] = []
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          const chunk = decoder.decode(value)
+          const lines = chunk.split('\n')
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = JSON.parse(line.slice(6))
+
+              if (data.type === 'progress') {
+                setProgressMessage(data.message)
+                if (data.current !== undefined) setProgressCurrent(data.current)
+                if (data.total !== undefined) setProgressTotal(data.total)
+              } else if (data.type === 'result') {
+                tempResults.push(data.result)
+                setResults([...tempResults])
+              } else if (data.type === 'error') {
+                tempErrors.push(data.message)
+                setErrors([...tempErrors])
+              } else if (data.type === 'complete') {
+                setResults(data.results)
+                setErrors(data.errors)
+              }
+            }
+          }
+        }
+      }
     } catch (error) {
       alert('Error checking stock: ' + error)
     } finally {
       setLoading(false)
+      setProgressMessage('')
     }
   }
 
@@ -295,6 +336,55 @@ export default function StockCheckerPage() {
             </button>
           </form>
         </div>
+
+        {/* Progress Indicator */}
+        {loading && (
+          <div style={{
+            background: 'white',
+            padding: '2rem',
+            borderRadius: '8px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+            marginBottom: '2rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1rem' }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                border: '4px solid #e5e7eb',
+                borderTop: '4px solid #667eea',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+                marginRight: '1rem'
+              }} />
+              <div>
+                <div style={{ fontSize: '1.125rem', fontWeight: '600', color: '#1f2937', marginBottom: '0.25rem' }}>
+                  {progressMessage || 'Processing...'}
+                </div>
+                {progressTotal > 0 && (
+                  <div style={{ fontSize: '0.875rem', color: '#6b7280' }}>
+                    {progressCurrent} / {progressTotal} items
+                  </div>
+                )}
+              </div>
+            </div>
+            {progressTotal > 0 && (
+              <div style={{
+                width: '100%',
+                height: '8px',
+                background: '#e5e7eb',
+                borderRadius: '4px',
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  width: `${(progressCurrent / progressTotal) * 100}%`,
+                  height: '100%',
+                  background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+                  transition: 'width 0.3s ease'
+                }} />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Errors */}
         {errors.length > 0 && (
