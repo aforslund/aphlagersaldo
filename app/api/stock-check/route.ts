@@ -87,10 +87,11 @@ async function getFluentInventory(token: string, locationRef: string): Promise<M
 // Helper to get Fluent inventory for specific PSIDs only (faster for spot-checks)
 async function getFluentInventoryForProducts(token: string, locationRef: string, psids: string[]): Promise<Map<string, number>> {
   // Fluent GraphQL doesn't support filtering by productRef in query params
-  // So we fetch all and filter client-side, but with pagination limit for speed
+  // So we fetch pages and filter client-side
+  // For small spot-checks, limit to 3 pages max to keep it fast
   const query = `
     query inventoryPositions($locationRefs:[String], $cursor: String) {
-      inventoryPositions(first: 2000, locationRef: $locationRefs, after: $cursor) {
+      inventoryPositions(first: 1000, locationRef: $locationRefs, after: $cursor) {
         edges {
           node {
             locationRef
@@ -110,9 +111,15 @@ async function getFluentInventoryForProducts(token: string, locationRef: string,
   let cursor: string | null = null
   let hasNextPage = true
   let foundCount = 0
+  let pageCount = 0
+  const maxPages = 3 // Limit to 3 pages (3000 items) for speed
 
-  // Fetch pages until we find all PSIDs or run out of pages
-  while (hasNextPage && foundCount < psids.length) {
+  console.log(`Fetching Fluent inventory for ${psids.length} PSIDs...`)
+
+  // Fetch pages until we find all PSIDs, hit max pages, or run out
+  while (hasNextPage && foundCount < psids.length && pageCount < maxPages) {
+    const startTime = Date.now()
+
     const response = await fetch(process.env.FLUENT_ENDPOINT!, {
       method: 'POST',
       headers: {
@@ -142,6 +149,7 @@ async function getFluentInventoryForProducts(token: string, locationRef: string,
     }
 
     const edges = data.data.inventoryPositions.edges
+    pageCount++
 
     edges.forEach((edge: { node: FluentInventoryNode; cursor: string }) => {
       // Check if this product is in our PSID list (case-insensitive)
@@ -153,6 +161,13 @@ async function getFluentInventoryForProducts(token: string, locationRef: string,
     })
 
     hasNextPage = data.data.inventoryPositions.pageInfo.hasNextPage
+
+    const duration = Date.now() - startTime
+    console.log(`Fluent page ${pageCount}: fetched ${edges.length} items in ${duration}ms, found ${foundCount}/${psids.length} PSIDs`)
+  }
+
+  if (foundCount < psids.length) {
+    console.warn(`Only found ${foundCount}/${psids.length} PSIDs in first ${pageCount} pages. Some items may not be in Fluent.`)
   }
 
   return inventoryMap
@@ -470,11 +485,17 @@ export async function POST(request: NextRequest) {
     }
     // SPOT-CHECK MODE: Only check Autocomplete and Fluent
     else {
+      const spotCheckStart = Date.now()
+
       // Get Fluent inventory for ONLY the specific PSIDs (much faster!)
       let fluentMap: Map<string, number>
       try {
+        const fluentStart = Date.now()
         const fluentToken = await getFluentToken()
+        console.log(`Got Fluent token in ${Date.now() - fluentStart}ms`)
+
         fluentMap = await getFluentInventoryForProducts(fluentToken, process.env.FLUENT_LOCATION_REF!, psids)
+        console.log(`Total Fluent inventory fetch: ${Date.now() - fluentStart}ms`)
       } catch (error) {
         console.error('Fluent inventory fetch error:', error)
         errors.push(`Failed to fetch Fluent inventory: ${error instanceof Error ? error.message : String(error)}`)
@@ -482,7 +503,8 @@ export async function POST(request: NextRequest) {
       }
 
       // Process PSIDs in parallel batches for speed
-      const batchSize = 5
+      const autocompleteStart = Date.now()
+      const batchSize = 10 // Increased from 5 to 10 for more parallelism
       for (let i = 0; i < psids.length; i += batchSize) {
         const batch = psids.slice(i, i + batchSize)
 
@@ -516,6 +538,9 @@ export async function POST(request: NextRequest) {
         const batchResults = await Promise.all(batchPromises)
         results.push(...batchResults.filter(r => r !== null) as ProductStockResult[])
       }
+
+      console.log(`Autocomplete processing: ${Date.now() - autocompleteStart}ms`)
+      console.log(`Total spot-check time: ${Date.now() - spotCheckStart}ms`)
     }
 
     const response: StockCheckResponse = {
