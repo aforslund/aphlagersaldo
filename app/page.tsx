@@ -11,8 +11,7 @@ export default function StockCheckerPage() {
   const [results, setResults] = useState<ProductStockResult[]>([])
   const [errors, setErrors] = useState<string[]>([])
   const [showOkResults, setShowOkResults] = useState(false)
-  const [skipGoogleFeed, setSkipGoogleFeed] = useState(false)
-  const [skipNyce, setSkipNyce] = useState(false)
+  const [checkMode, setCheckMode] = useState<'full' | 'spot'>('spot')
   const [nyceCsvData, setNyceCsvData] = useState<any>(null)
   const router = useRouter()
 
@@ -85,13 +84,19 @@ export default function StockCheckerPage() {
         return
       }
 
+      // Validate Full Check mode requires NYCE CSV
+      if (checkMode === 'full' && !nyceCsvData) {
+        alert('Full Check mode requires NYCE CSV upload')
+        setLoading(false)
+        return
+      }
+
       const response = await fetch('/api/stock-check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           psids: psidList,
-          skipGoogleFeed,
-          skipNyce,
+          checkMode,
           nyceCsvData,
         }),
       })
@@ -175,56 +180,74 @@ export default function StockCheckerPage() {
               </p>
             </div>
 
-            {/* Check Options */}
+            {/* Check Mode Selection */}
             <div style={{ marginBottom: '1.5rem', padding: '1rem', background: '#f9fafb', borderRadius: '4px' }}>
               <h3 style={{ fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.75rem', color: '#374151' }}>
-                Check Options
+                Check Mode
               </h3>
 
-              <label style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem', cursor: 'pointer' }}>
+              <label style={{ display: 'flex', alignItems: 'start', marginBottom: '0.75rem', cursor: 'pointer' }}>
                 <input
-                  type="checkbox"
-                  checked={skipGoogleFeed}
-                  onChange={(e) => setSkipGoogleFeed(e.target.checked)}
-                  style={{ marginRight: '0.5rem', cursor: 'pointer' }}
-                />
-                <span style={{ fontSize: '0.875rem', color: '#374151' }}>
-                  Skip Google Feed check (items already known to be unavailable on website)
-                </span>
-              </label>
-
-              <label style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={skipNyce}
+                  type="radio"
+                  name="checkMode"
+                  value="spot"
+                  checked={checkMode === 'spot'}
                   onChange={(e) => {
-                    setSkipNyce(e.target.checked)
-                    if (e.target.checked) setNyceCsvData(null)
+                    setCheckMode('spot')
+                    setNyceCsvData(null)
                   }}
-                  style={{ marginRight: '0.5rem', cursor: 'pointer' }}
+                  style={{ marginRight: '0.5rem', marginTop: '0.25rem', cursor: 'pointer' }}
                 />
-                <span style={{ fontSize: '0.875rem', color: '#374151' }}>
-                  Skip NYCE check (only check CommerceTools and Fluent)
-                </span>
+                <div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>
+                    Spot-check
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                    Quick check of Autocomplete API (CommerceTools) and Fluent only
+                  </div>
+                </div>
               </label>
 
-              {!skipNyce && (
-                <div style={{ marginLeft: '1.5rem', marginTop: '0.5rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.875rem', color: '#374151', marginBottom: '0.5rem' }}>
-                    Upload NYCE CSV (optional - use if API unavailable)
+              <label style={{ display: 'flex', alignItems: 'start', marginBottom: '0.75rem', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="checkMode"
+                  value="full"
+                  checked={checkMode === 'full'}
+                  onChange={(e) => setCheckMode('full')}
+                  style={{ marginRight: '0.5rem', marginTop: '0.25rem', cursor: 'pointer' }}
+                />
+                <div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: '600', color: '#374151' }}>
+                    Full Check
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                    Complete analysis: Google Feed → NYCE → Fluent → Autocomplete (NYCE CSV required)
+                  </div>
+                </div>
+              </label>
+
+              {checkMode === 'full' && (
+                <div style={{ marginLeft: '1.5rem', marginTop: '1rem', padding: '1rem', background: 'white', borderRadius: '4px', border: '1px solid #d1d5db' }}>
+                  <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '600', color: '#374151', marginBottom: '0.5rem' }}>
+                    Upload NYCE CSV (Required) *
                   </label>
                   <input
                     type="file"
                     accept=".csv"
                     onChange={handleNyceCsvUpload}
-                    style={{ fontSize: '0.875rem' }}
+                    style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}
                   />
-                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+                  <p style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.5rem' }}>
                     CSV format: SKU, Balance, InOrder
                   </p>
-                  {nyceCsvData && (
-                    <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: '#d1fae5', borderRadius: '4px', fontSize: '0.75rem', color: '#065f46' }}>
+                  {nyceCsvData ? (
+                    <div style={{ padding: '0.5rem', background: '#d1fae5', borderRadius: '4px', fontSize: '0.75rem', color: '#065f46' }}>
                       ✓ NYCE CSV loaded ({Object.keys(nyceCsvData).length} SKUs)
+                    </div>
+                  ) : (
+                    <div style={{ padding: '0.5rem', background: '#fef2f2', borderRadius: '4px', fontSize: '0.75rem', color: '#991b1b' }}>
+                      ⚠ NYCE CSV required for Full Check mode
                     </div>
                   )}
                 </div>

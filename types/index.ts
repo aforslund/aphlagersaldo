@@ -56,9 +56,8 @@ export interface NyceCsvData {
 
 export interface StockCheckRequest {
   psids: string[]
-  skipGoogleFeed?: boolean
+  checkMode: 'full' | 'spot'
   nyceCsvData?: NyceCsvData
-  skipNyce?: boolean
 }
 
 export interface ProductStockResult {

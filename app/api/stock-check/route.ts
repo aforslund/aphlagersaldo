@@ -153,20 +153,17 @@ function addNyceInsights(
   }
 }
 
-// Analysis logic based on stock levels
-function analyzeStock(
+// FULL CHECK: Analysis for items NOT sellable in Google Feed
+function analyzeStockFull(
   psid: string,
   productName: string,
-  googleSellable: boolean | null,
   commerceToolsStock: number,
   fluentStock: number,
-  nyceArticle: any,
-  skipGoogleFeed: boolean = false,
-  skipNyce: boolean = false
+  nyceArticle: any
 ): ProductStockResult {
   const details: string[] = []
   let analysis = ''
-  let status: 'ok' | 'issue' = 'ok'
+  const status: 'ok' | 'issue' = 'issue'
 
   // Extract NYCE data
   const nyceOnHand = nyceArticle?.onHandQty || 0
@@ -175,141 +172,52 @@ function analyzeStock(
   const nyceStoppedQty = nyceArticle?.stoppedQty || 0
   const nyceAvailable = nyceOnHand - nyceInOrder
 
-  // Special mode: Google Feed skipped (items known to be unavailable)
-  if (skipGoogleFeed) {
-    status = 'issue'
-    details.push('Google Feed check skipped - item known to be unavailable on website')
+  details.push('Google Feed: NOT SELLABLE (Full Check mode)')
 
-    // Simplified spärr detection
-    if (commerceToolsStock > 0 && fluentStock > 0) {
-      analysis = 'TROLIGTVIS EN SPÄRR (Probably a block)'
-      details.push('Both CommerceTools and Fluent have stock but item not available on website')
-      details.push('This strongly indicates a business logic block (affärslogik spärr)')
-      details.push('Action: Check business rules and restrictions')
-    } else if (commerceToolsStock === 0 && fluentStock > 0) {
-      analysis = 'TROLIGTVIS SYNKPROBLEM (Probably sync problem)'
-      details.push(`CommerceTools shows 0 but Fluent has ${fluentStock}`)
-      details.push('Action: Check CommerceTools sync process with Fluent')
-    } else if (commerceToolsStock === 0 && fluentStock === 0 && nyceOnHand > 0) {
-      analysis = 'LAGERSYNKPROBLEM ELLER UTSÅLT (Inventory sync problem or sold out)'
-      details.push(`NYCE has ${nyceOnHand} units but Fluent shows 0`)
-      details.push('Action: Check if stock is available for digital sales in NYCE')
-    } else if (commerceToolsStock === 0 && fluentStock === 0 && (skipNyce || nyceOnHand === 0)) {
-      analysis = 'EJ INLEVERAT? (Not delivered?)'
-      details.push('No stock in any system')
-      details.push('Action: Check delivery status')
-    } else {
-      analysis = 'INVESTIGATE - Review stock levels'
-      details.push(`CT: ${commerceToolsStock}, Fluent: ${fluentStock}${!skipNyce ? `, NYCE: ${nyceOnHand}` : ''}`)
-    }
-
-    // Add NYCE insights if available
-    if (!skipNyce && nyceArticle) {
-      addNyceInsights(details, nycePhysical, nyceOnHand, nyceInOrder, nyceStoppedQty, nyceAvailable, fluentStock)
-    }
-
-    return {
-      psid,
-      productName,
-      googleSellable: false,
-      commerceToolsStock,
-      fluentStock,
-      nyceStock: nyceArticle,
-      status,
-      analysis,
-      details,
-    }
+  // Apply the logic from the screenshot matrix
+  // Scenario 1: Troligtvis en spärr (Probably a block)
+  if (commerceToolsStock > 0 && fluentStock > 0 && nyceOnHand > 0) {
+    analysis = 'TROLIGTVIS EN SPÄRR (Probably a block)'
+    details.push('All systems have stock but Google Feed shows not sellable')
+    details.push('This indicates a business logic block/restriction (affärslogik spärr)')
+    details.push('Action: Check business rules and restrictions in Google Feed logic')
+  }
+  // Scenario 2: Troligtvis synkproblem (Probably sync problem)
+  else if (commerceToolsStock === 0 && fluentStock > 0 && nyceOnHand > 0) {
+    analysis = 'TROLIGTVIS SYNKPROBLEM (Probably sync problem)'
+    details.push(`CommerceTools shows 0 but Fluent has ${fluentStock} and NYCE has ${nyceOnHand}`)
+    details.push('CommerceTools should mirror Fluent with some delay')
+    details.push('Action: Check CommerceTools sync process with Fluent')
+  }
+  // Scenario 3: Lagersynkproblem eller utsålt (Inventory sync problem or sold out)
+  else if (commerceToolsStock === 0 && fluentStock === 0 && nyceOnHand > 0) {
+    analysis = 'LAGERSYNKPROBLEM ELLER UTSÅLT (Inventory sync problem or sold out)'
+    details.push(`NYCE has ${nyceOnHand} units but Fluent shows 0`)
+    details.push('Either stock sync issue from NYCE to Fluent or items not digitally sellable')
+    details.push('Action: Check if stock is available for digital sales in NYCE')
+  }
+  // Scenario 4: Ej inleverat? (Not delivered?)
+  else if (commerceToolsStock === 0 && fluentStock === 0 && nyceOnHand === 0) {
+    analysis = 'EJ INLEVERAT? (Not delivered?)'
+    details.push('No stock in any system')
+    details.push('Product may not have been delivered to warehouse yet')
+    details.push('Action: Check delivery status and inbound shipments')
+  }
+  // Edge cases not covered in the matrix
+  else {
+    analysis = 'INVESTIGATE - Stock pattern not matching standard scenarios'
+    details.push(`CT: ${commerceToolsStock}, Fluent: ${fluentStock}, NYCE: ${nyceOnHand}`)
   }
 
-  // Normal mode: Check Google Feed status
-  // If Google is sellable and all systems have stock, it's OK
-  if (googleSellable && commerceToolsStock > 0 && fluentStock > 0) {
-    // Only check NYCE if not skipped
-    if (!skipNyce && nyceOnHand === 0) {
-      status = 'issue'
-      analysis = 'WARNING - Google sellable but NYCE has no stock'
-      details.push('Potential sync issue - check NYCE inventory')
-    } else {
-      return {
-        psid,
-        productName,
-        googleSellable,
-        commerceToolsStock,
-        fluentStock,
-        nyceStock: nyceArticle,
-        status: 'ok',
-        analysis: 'All systems in sync with stock available',
-        details: [],
-      }
-    }
-  }
-
-  // If Google is not sellable, we need to investigate
-  status = 'issue'
-
-  // Check each system
-  if (!googleSellable) {
-    details.push('Google Feed: NOT SELLABLE')
-
-    // Apply the logic from the screenshot matrix
-    // Scenario 1: Troligtvis en spärr (Probably a block)
-    // Google: Not Sellable, CT: >0, Fluent: >0, NYCE: >0
-    if (commerceToolsStock > 0 && fluentStock > 0 && nyceOnHand > 0) {
-      analysis = 'TROLIGTVIS EN SPÄRR (Probably a block)'
-      details.push('All systems have stock but Google Feed shows not sellable')
-      details.push('This indicates a business logic block/restriction (affärslogik spärr)')
-      details.push('Action: Check business rules and restrictions in Google Feed logic')
-    }
-    // Scenario 2: Troligtvis synkproblem (Probably sync problem)
-    // Google: Not Sellable, CT: 0, Fluent: >0, NYCE: >0
-    else if (commerceToolsStock === 0 && fluentStock > 0 && nyceOnHand > 0) {
-      analysis = 'TROLIGTVIS SYNKPROBLEM (Probably sync problem)'
-      details.push(`CommerceTools shows 0 but Fluent has ${fluentStock} and NYCE has ${nyceOnHand}`)
-      details.push('CommerceTools should mirror Fluent with some delay')
-      details.push('Action: Check CommerceTools sync process with Fluent')
-    }
-    // Scenario 3: Lagersynkproblem eller utsålt (Inventory sync problem or sold out)
-    // Google: Not Sellable, CT: 0, Fluent: 0, NYCE: >0
-    else if (commerceToolsStock === 0 && fluentStock === 0 && nyceOnHand > 0) {
-      analysis = 'LAGERSYNKPROBLEM ELLER UTSÅLT (Inventory sync problem or sold out)'
-      details.push(`NYCE has ${nyceOnHand} units but Fluent shows 0`)
-      details.push('Either stock sync issue from NYCE to Fluent or items not digitally sellable')
-      details.push('Action: Check if stock is available for digital sales in NYCE')
-    }
-    // Scenario 4: Ej inleverat? (Not delivered?)
-    // Google: Not Sellable, CT: 0, Fluent: 0, NYCE: 0
-    else if (commerceToolsStock === 0 && fluentStock === 0 && nyceOnHand === 0) {
-      analysis = 'EJ INLEVERAT? (Not delivered?)'
-      details.push('No stock in any system')
-      details.push('Product may not have been delivered to warehouse yet')
-      details.push('Action: Check delivery status and inbound shipments')
-    }
-    // Edge cases not covered in the matrix
-    else {
-      analysis = 'INVESTIGATE - Stock pattern not matching standard scenarios'
-      details.push(`CT: ${commerceToolsStock}, Fluent: ${fluentStock}, NYCE: ${nyceOnHand}`)
-    }
-
-    // NYCE-specific insights
-    if (!skipNyce && nyceArticle) {
-      addNyceInsights(details, nycePhysical, nyceOnHand, nyceInOrder, nyceStoppedQty, nyceAvailable, fluentStock)
-    }
-  } else {
-    // Google is sellable but we're here, so something is off
-    if (commerceToolsStock === 0 || fluentStock === 0 || nyceOnHand === 0) {
-      analysis = 'WARNING - Google shows sellable but missing stock in one or more systems'
-      status = 'issue'
-
-      if (commerceToolsStock === 0) details.push('CommerceTools: OUT OF STOCK')
-      if (fluentStock === 0) details.push('Fluent: OUT OF STOCK')
-      if (nyceOnHand === 0) details.push('NYCE: OUT OF STOCK')
-    }
+  // NYCE-specific insights
+  if (nyceArticle) {
+    addNyceInsights(details, nycePhysical, nyceOnHand, nyceInOrder, nyceStoppedQty, nyceAvailable, fluentStock)
   }
 
   return {
     psid,
     productName,
-    googleSellable,
+    googleSellable: false,
     commerceToolsStock,
     fluentStock,
     nyceStock: nyceArticle,
@@ -319,9 +227,65 @@ function analyzeStock(
   }
 }
 
+// SPOT-CHECK: Quick analysis of just CommerceTools and Fluent
+function analyzeStockSpot(
+  psid: string,
+  productName: string,
+  commerceToolsStock: number,
+  fluentStock: number
+): ProductStockResult {
+  const details: string[] = []
+  let analysis = ''
+  let status: 'ok' | 'issue' = 'ok'
+
+  details.push('Spot-check mode: Autocomplete (CommerceTools) and Fluent only')
+
+  // Analyze sync between CT and Fluent
+  if (commerceToolsStock > 0 && fluentStock > 0) {
+    const difference = Math.abs(commerceToolsStock - fluentStock)
+    if (difference === 0) {
+      analysis = 'PERFECTLY SYNCED - CT and Fluent match exactly'
+    } else if (difference <= 5) {
+      analysis = 'IN SYNC - CT and Fluent closely aligned'
+      details.push(`Minor difference: ${difference} units`)
+    } else {
+      analysis = 'SYNC VARIANCE - CT and Fluent have different stock levels'
+      status = 'issue'
+      details.push(`Difference: ${difference} units (CT: ${commerceToolsStock}, Fluent: ${fluentStock})`)
+      details.push('Note: Fluent is typically ahead as it releases to downstream systems with delay')
+    }
+  } else if (commerceToolsStock === 0 && fluentStock > 0) {
+    analysis = 'SYNC ISSUE - CommerceTools not updated'
+    status = 'issue'
+    details.push(`Fluent has ${fluentStock} units but CommerceTools shows 0`)
+    details.push('Action: Check CommerceTools sync process with Fluent')
+  } else if (commerceToolsStock > 0 && fluentStock === 0) {
+    analysis = 'UNEXPECTED - CT has stock but Fluent shows 0'
+    status = 'issue'
+    details.push(`CommerceTools shows ${commerceToolsStock} but Fluent has 0`)
+    details.push('This is unusual - Fluent should be ahead. Investigate data flow.')
+  } else {
+    // Both are 0
+    analysis = 'NO STOCK - Both systems show 0'
+    details.push('Item is out of stock in both CommerceTools and Fluent')
+  }
+
+  return {
+    psid,
+    productName,
+    googleSellable: null,
+    commerceToolsStock,
+    fluentStock,
+    nyceStock: null,
+    status,
+    analysis,
+    details,
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
-    const { psids, skipGoogleFeed, skipNyce, nyceCsvData }: StockCheckRequest = await request.json()
+    const { psids, checkMode, nyceCsvData }: StockCheckRequest = await request.json()
 
     if (!psids || psids.length === 0) {
       return NextResponse.json(
@@ -330,96 +294,146 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Validate Full Check mode requirements
+    if (checkMode === 'full' && !nyceCsvData) {
+      return NextResponse.json(
+        { error: 'Full Check mode requires NYCE CSV data' },
+        { status: 400 }
+      )
+    }
+
     const results: ProductStockResult[] = []
     const errors: string[] = []
 
-    // Fetch Google Feed (unless skipped)
-    let googleMap = new Map<string, GoogleFeedProduct>()
-    if (!skipGoogleFeed) {
+    // FULL CHECK MODE: Google Feed → filter not sellable → check NYCE, Fluent, Autocomplete
+    if (checkMode === 'full') {
+      // 1. Fetch Google Feed
+      let googleMap = new Map<string, GoogleFeedProduct>()
       try {
         const googleFeedResponse = await fetch(process.env.NEXT_PUBLIC_GOOGLE_FEED_URL!)
         const googleProducts: GoogleFeedProduct[] = await googleFeedResponse.json()
         googleMap = new Map(googleProducts.map(p => [p.id, p]))
       } catch (error) {
         errors.push('Failed to fetch Google Feed')
+        return NextResponse.json({ results: [], errors }, { status: 500 })
       }
-    }
 
-    // Get Fluent inventory
-    let fluentMap: Map<string, number>
-    try {
-      const fluentToken = await getFluentToken()
-      fluentMap = await getFluentInventory(fluentToken, process.env.FLUENT_LOCATION_REF!)
-    } catch (error) {
-      errors.push('Failed to fetch Fluent inventory')
-      fluentMap = new Map()
-    }
+      // 2. Get Fluent inventory
+      let fluentMap: Map<string, number>
+      try {
+        const fluentToken = await getFluentToken()
+        fluentMap = await getFluentInventory(fluentToken, process.env.FLUENT_LOCATION_REF!)
+      } catch (error) {
+        errors.push('Failed to fetch Fluent inventory')
+        fluentMap = new Map()
+      }
 
-    // Get NYCE stock (from API or CSV, unless skipped)
-    let nyceDataMap = new Map<string, any>()
-    if (!skipNyce) {
-      if (nyceCsvData) {
-        // Use CSV data
-        Object.keys(nyceCsvData).forEach(sku => {
-          nyceDataMap.set(sku, {
-            articleId: sku,
-            onHandQty: nyceCsvData[sku].balance,
-            inOrderQty: nyceCsvData[sku].inOrder,
-            physicalQty: nyceCsvData[sku].balance, // Assume physical = balance from CSV
-            stoppedQty: 0,
-            allocatedQty: 0,
-          })
+      // 3. Process NYCE CSV data
+      const nyceDataMap = new Map<string, any>()
+      Object.keys(nyceCsvData!).forEach(sku => {
+        nyceDataMap.set(sku, {
+          articleId: sku,
+          onHandQty: nyceCsvData![sku].balance,
+          inOrderQty: nyceCsvData![sku].inOrder,
+          physicalQty: nyceCsvData![sku].balance,
+          stoppedQty: 0,
+          allocatedQty: 0,
         })
-      } else {
-        // Try to fetch from API
+      })
+
+      // 4. Process each PSID - only check items that are NOT sellable in Google Feed
+      for (const psid of psids) {
         try {
-          const nyceToken = await getNyceToken()
-          const nyceData = await getNyceStock(nyceToken, psids)
-          nyceData.articles.forEach(article => {
-            nyceDataMap.set(article.articleId, article)
-          })
+          await new Promise(resolve => setTimeout(resolve, 100))
+
+          const googleProduct = googleMap.get(psid)
+          const googleSellable = googleProduct?.availability === 'in_stock'
+
+          // Skip items that ARE sellable (only process not sellable items)
+          if (googleSellable) {
+            results.push({
+              psid,
+              productName: 'N/A',
+              googleSellable: true,
+              commerceToolsStock: 0,
+              fluentStock: 0,
+              nyceStock: null,
+              status: 'ok',
+              analysis: 'Sellable in Google Feed - skipped in Full Check mode',
+              details: ['Full Check only analyzes items not sellable in Google Feed'],
+            })
+            continue
+          }
+
+          // Get autocomplete data
+          const autocompleteUrl = `${process.env.NEXT_PUBLIC_AUTOCOMPLETE_URL}?language=sv-SE&q=${psid}`
+          const autocompleteResponse = await fetch(autocompleteUrl)
+          const autocompleteData: AutocompleteResponse = await autocompleteResponse.json()
+
+          const matchedProduct = autocompleteData.products.find(
+            p => p.variant && p.variant.sku === psid
+          )
+
+          const productName = matchedProduct?.productName || 'Unknown Product'
+          const commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
+          const fluentStock = fluentMap.get(psid) || 0
+          const nyceArticle = nyceDataMap.get(psid) || null
+
+          const result = analyzeStockFull(
+            psid,
+            productName,
+            commerceToolsStock,
+            fluentStock,
+            nyceArticle
+          )
+
+          results.push(result)
         } catch (error) {
-          errors.push('Failed to fetch NYCE stock - please upload NYCE CSV or check "Skip NYCE"')
+          errors.push(`Failed to process PSID ${psid}: ${error}`)
         }
       }
     }
-
-    // Process each PSID
-    for (const psid of psids) {
+    // SPOT-CHECK MODE: Only check Autocomplete and Fluent
+    else {
+      // Get Fluent inventory
+      let fluentMap: Map<string, number>
       try {
-        // Small delay to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 100))
-
-        // Get autocomplete data (CommerceTools stock)
-        const autocompleteUrl = `${process.env.NEXT_PUBLIC_AUTOCOMPLETE_URL}?language=sv-SE&q=${psid}`
-        const autocompleteResponse = await fetch(autocompleteUrl)
-        const autocompleteData: AutocompleteResponse = await autocompleteResponse.json()
-
-        const matchedProduct = autocompleteData.products.find(
-          p => p.variant && p.variant.sku === psid
-        )
-
-        const productName = matchedProduct?.productName || 'Unknown Product'
-        const commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
-        const fluentStock = fluentMap.get(psid) || 0
-        const googleProduct = googleMap.get(psid)
-        const googleSellable = skipGoogleFeed ? null : (googleProduct?.availability === 'in_stock')
-        const nyceArticle = nyceDataMap.get(psid) || null
-
-        const result = analyzeStock(
-          psid,
-          productName,
-          googleSellable,
-          commerceToolsStock,
-          fluentStock,
-          nyceArticle,
-          skipGoogleFeed,
-          skipNyce
-        )
-
-        results.push(result)
+        const fluentToken = await getFluentToken()
+        fluentMap = await getFluentInventory(fluentToken, process.env.FLUENT_LOCATION_REF!)
       } catch (error) {
-        errors.push(`Failed to process PSID ${psid}: ${error}`)
+        errors.push('Failed to fetch Fluent inventory')
+        fluentMap = new Map()
+      }
+
+      // Process each PSID
+      for (const psid of psids) {
+        try {
+          await new Promise(resolve => setTimeout(resolve, 100))
+
+          // Get autocomplete data
+          const autocompleteUrl = `${process.env.NEXT_PUBLIC_AUTOCOMPLETE_URL}?language=sv-SE&q=${psid}`
+          const autocompleteResponse = await fetch(autocompleteUrl)
+          const autocompleteData: AutocompleteResponse = await autocompleteResponse.json()
+
+          const matchedProduct = autocompleteData.products.find(
+            p => p.variant && p.variant.sku === psid
+          )
+
+          const productName = matchedProduct?.productName || 'Unknown Product'
+          const commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
+          const fluentStock = fluentMap.get(psid) || 0
+
+          const result = analyzeStockSpot(
+            psid,
+            productName,
+            commerceToolsStock,
+            fluentStock
+          )
+
+          results.push(result)
+        } catch (error) {
+          errors.push(`Failed to process PSID ${psid}: ${error}`)
+        }
       }
     }
 
