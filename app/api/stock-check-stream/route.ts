@@ -31,73 +31,69 @@ async function getFluentInventoryForProducts(
   psids: string[],
   onProgress: (message: string) => void
 ): Promise<Map<string, number>> {
+  // Query Fluent for each PSID individually - much faster and more targeted
   const query = `
-    query inventoryPositions($locationRefs:[String], $cursor: String) {
-      inventoryPositions(first: 1000, locationRef: $locationRefs, after: $cursor) {
+    query inventoryPositions($locationRef: String!, $productRef: String!) {
+      inventoryPositions(first: 1, locationRef: $locationRef, productRef: $productRef) {
         edges {
           node {
-            locationRef
             productRef
             onHand
           }
-          cursor
-        }
-        pageInfo {
-          hasNextPage
         }
       }
     }`
 
   const inventoryMap = new Map<string, number>()
-  const psidSet = new Set(psids.map(p => p.toLowerCase()))
-  let cursor: string | null = null
-  let hasNextPage = true
-  let foundCount = 0
-  let pageCount = 0
-  const maxPages = 3
 
-  while (hasNextPage && foundCount < psids.length && pageCount < maxPages) {
-    onProgress(`Fetching Fluent inventory page ${pageCount + 1}...`)
+  for (let i = 0; i < psids.length; i++) {
+    const psid = psids[i]
+    onProgress(`Checking Fluent for ${psid} (${i + 1}/${psids.length})...`)
 
-    const response = await fetch(process.env.FLUENT_ENDPOINT!, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query,
-        variables: {
-          locationRefs: [locationRef],
-          cursor,
+    try {
+      const response = await fetch(process.env.FLUENT_ENDPOINT!, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
-      }),
-    })
+        body: JSON.stringify({
+          query,
+          variables: {
+            locationRef: locationRef,
+            productRef: psid,
+          },
+        }),
+      })
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch Fluent inventory: ${response.status}`)
-    }
-
-    const data = await response.json()
-    if (data.errors) {
-      throw new Error(`Fluent GraphQL errors: ${JSON.stringify(data.errors)}`)
-    }
-
-    const edges = data.data.inventoryPositions.edges
-    pageCount++
-
-    edges.forEach((edge: { node: FluentInventoryNode; cursor: string }) => {
-      if (psidSet.has(edge.node.productRef.toLowerCase())) {
-        inventoryMap.set(edge.node.productRef, edge.node.onHand)
-        foundCount++
+      if (!response.ok) {
+        console.error(`Fluent API error for ${psid}:`, response.status)
+        continue // Skip this item but continue with others
       }
-      cursor = edge.cursor
-    })
 
-    hasNextPage = data.data.inventoryPositions.pageInfo.hasNextPage
-    onProgress(`Found ${foundCount}/${psids.length} items in Fluent (page ${pageCount})`)
+      const data = await response.json()
+      if (data.errors) {
+        console.error(`Fluent GraphQL errors for ${psid}:`, data.errors)
+        continue
+      }
+
+      const edges = data.data.inventoryPositions.edges
+      if (edges && edges.length > 0) {
+        const onHand = edges[0].node.onHand
+        inventoryMap.set(psid, onHand)
+      }
+
+      // Add delay to avoid DDOS-like behavior (250ms between requests)
+      if (i < psids.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+    } catch (error) {
+      console.error(`Error fetching Fluent inventory for ${psid}:`, error)
+      // Continue with next item
+    }
   }
 
+  onProgress(`Fluent check complete: found ${inventoryMap.size}/${psids.length} items`)
   return inventoryMap
 }
 

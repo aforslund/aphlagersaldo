@@ -84,92 +84,71 @@ async function getFluentInventory(token: string, locationRef: string): Promise<M
   return inventoryMap
 }
 
-// Helper to get Fluent inventory for specific PSIDs only (faster for spot-checks)
+// Helper to get Fluent inventory for specific PSIDs (queries each individually)
 async function getFluentInventoryForProducts(token: string, locationRef: string, psids: string[]): Promise<Map<string, number>> {
-  // Fluent GraphQL doesn't support filtering by productRef in query params
-  // So we fetch pages and filter client-side
-  // For small spot-checks, limit to 3 pages max to keep it fast
+  // Query Fluent for each PSID individually - much faster and more targeted
   const query = `
-    query inventoryPositions($locationRefs:[String], $cursor: String) {
-      inventoryPositions(first: 1000, locationRef: $locationRefs, after: $cursor) {
+    query inventoryPositions($locationRef: String!, $productRef: String!) {
+      inventoryPositions(first: 1, locationRef: $locationRef, productRef: $productRef) {
         edges {
           node {
-            locationRef
             productRef
             onHand
           }
-          cursor
-        }
-        pageInfo {
-          hasNextPage
         }
       }
     }`
 
   const inventoryMap = new Map<string, number>()
-  const psidSet = new Set(psids.map(p => p.toLowerCase()))
-  let cursor: string | null = null
-  let hasNextPage = true
-  let foundCount = 0
-  let pageCount = 0
-  const maxPages = 3 // Limit to 3 pages (3000 items) for speed
+  console.log(`Fetching Fluent inventory for ${psids.length} PSIDs individually...`)
 
-  console.log(`Fetching Fluent inventory for ${psids.length} PSIDs...`)
+  for (let i = 0; i < psids.length; i++) {
+    const psid = psids[i]
 
-  // Fetch pages until we find all PSIDs, hit max pages, or run out
-  while (hasNextPage && foundCount < psids.length && pageCount < maxPages) {
-    const startTime = Date.now()
-
-    const response = await fetch(process.env.FLUENT_ENDPOINT!, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        query,
-        variables: {
-          locationRefs: [locationRef],
-          cursor,
+    try {
+      const response = await fetch(process.env.FLUENT_ENDPOINT!, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
-      }),
-    })
+        body: JSON.stringify({
+          query,
+          variables: {
+            locationRef: locationRef,
+            productRef: psid,
+          },
+        }),
+      })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error('Fluent API error:', response.status, errorText)
-      throw new Error(`Failed to fetch Fluent inventory: ${response.status} ${errorText}`)
-    }
-
-    const data = await response.json()
-
-    if (data.errors) {
-      console.error('Fluent GraphQL errors:', JSON.stringify(data.errors))
-      throw new Error(`Fluent GraphQL errors: ${JSON.stringify(data.errors)}`)
-    }
-
-    const edges = data.data.inventoryPositions.edges
-    pageCount++
-
-    edges.forEach((edge: { node: FluentInventoryNode; cursor: string }) => {
-      // Check if this product is in our PSID list (case-insensitive)
-      if (psidSet.has(edge.node.productRef.toLowerCase())) {
-        inventoryMap.set(edge.node.productRef, edge.node.onHand)
-        foundCount++
+      if (!response.ok) {
+        console.error(`Fluent API error for ${psid}:`, response.status)
+        continue
       }
-      cursor = edge.cursor
-    })
 
-    hasNextPage = data.data.inventoryPositions.pageInfo.hasNextPage
+      const data = await response.json()
+      if (data.errors) {
+        console.error(`Fluent GraphQL errors for ${psid}:`, data.errors)
+        continue
+      }
 
-    const duration = Date.now() - startTime
-    console.log(`Fluent page ${pageCount}: fetched ${edges.length} items in ${duration}ms, found ${foundCount}/${psids.length} PSIDs`)
+      const edges = data.data.inventoryPositions.edges
+      if (edges && edges.length > 0) {
+        const onHand = edges[0].node.onHand
+        inventoryMap.set(psid, onHand)
+        console.log(`Fluent: ${psid} = ${onHand}`)
+      }
+
+      // Add delay to avoid DDOS-like behavior (250ms between requests)
+      if (i < psids.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+    } catch (error) {
+      console.error(`Error fetching Fluent inventory for ${psid}:`, error)
+    }
   }
 
-  if (foundCount < psids.length) {
-    console.warn(`Only found ${foundCount}/${psids.length} PSIDs in first ${pageCount} pages. Some items may not be in Fluent.`)
-  }
-
+  console.log(`Fluent check complete: found ${inventoryMap.size}/${psids.length} items`)
   return inventoryMap
 }
 
