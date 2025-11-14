@@ -197,6 +197,19 @@ export default function StockCheckerPage() {
   const okResults = getSortedResults(results.filter(r => r.status === 'ok'))
   const issueResults = getSortedResults(results.filter(r => r.status === 'issue' || r.status === 'warning'))
 
+  // Group issue results by analysis type
+  const groupedIssues = issueResults.reduce((groups, result) => {
+    const category = result.analysis || 'Other'
+    if (!groups[category]) {
+      groups[category] = []
+    }
+    groups[category].push(result)
+    return groups
+  }, {} as Record<string, ProductStockResult[]>)
+
+  // Sort groups by count (largest first)
+  const sortedIssueGroups = Object.entries(groupedIssues).sort((a, b) => b[1].length - a[1].length)
+
   return (
     <div style={{ minHeight: '100vh', background: '#f3f4f6', padding: '2rem' }}>
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
@@ -596,20 +609,99 @@ export default function StockCheckerPage() {
               </div>
             )}
 
-            {/* Issue Results */}
+            {/* Issue Results - Grouped by Type */}
             {issueResults.length > 0 && (
               <div>
                 <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1rem', color: '#ef4444' }}>
-                  Items Requiring Attention
+                  Items Requiring Attention ({issueResults.length})
                 </h2>
-                {issueResults.map((result, i) => (
-                  <ResultCard key={i} result={result} />
+                {sortedIssueGroups.map(([category, items], groupIndex) => (
+                  <IssueGroup
+                    key={groupIndex}
+                    category={category}
+                    items={items}
+                  />
                 ))}
               </div>
             )}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function IssueGroup({ category, items }: { category: string, items: ProductStockResult[] }) {
+  const [isExpanded, setIsExpanded] = useState(true)
+
+  // Determine color based on category
+  const getColorScheme = () => {
+    if (category.includes('SPÄRR') || category.includes('block')) {
+      return { bg: '#fef3c7', text: '#92400e', border: '#f59e0b' }  // Yellow/amber for blocks
+    } else if (category.includes('SYNKPROBLEM') || category.includes('sync')) {
+      return { bg: '#fecaca', text: '#991b1b', border: '#ef4444' }  // Red for sync issues
+    } else if (category.includes('LAGERSYNK') || category.includes('UTSÅLT')) {
+      return { bg: '#fed7aa', text: '#9a3412', border: '#f97316' }  // Orange for inventory sync
+    } else if (category.includes('INLEVERAT') || category.includes('delivered')) {
+      return { bg: '#e9d5ff', text: '#581c87', border: '#a855f7' }  // Purple for not delivered
+    } else {
+      return { bg: '#e5e7eb', text: '#374151', border: '#6b7280' }  // Gray for other
+    }
+  }
+
+  const colors = getColorScheme()
+
+  return (
+    <div style={{
+      background: 'white',
+      borderRadius: '8px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+      marginBottom: '1rem',
+      overflow: 'hidden',
+      border: `1px solid ${colors.border}`
+    }}>
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        style={{
+          width: '100%',
+          padding: '1rem',
+          background: colors.bg,
+          border: 'none',
+          textAlign: 'left',
+          cursor: 'pointer',
+          fontWeight: '600',
+          color: colors.text,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <span style={{ fontSize: '1.25rem' }}>{isExpanded ? '▼' : '►'}</span>
+          <div>
+            <div style={{ fontSize: '0.95rem', fontWeight: '700' }}>{category}</div>
+            <div style={{ fontSize: '0.75rem', opacity: 0.8, marginTop: '0.125rem' }}>
+              {items.length} {items.length === 1 ? 'item' : 'items'}
+            </div>
+          </div>
+        </div>
+        <div style={{
+          padding: '0.25rem 0.75rem',
+          background: 'white',
+          borderRadius: '9999px',
+          fontSize: '0.875rem',
+          fontWeight: '700'
+        }}>
+          {items.length}
+        </div>
+      </button>
+      {isExpanded && (
+        <div style={{ padding: '1rem' }}>
+          {items.map((result, i) => (
+            <ResultCard key={i} result={result} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
