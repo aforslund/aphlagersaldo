@@ -87,16 +87,9 @@ export default function StockCheckerPage() {
 
       let psidList: string[] = []
 
-      // For Full Check, PSIDs come from NYCE CSV (optional manual entry to filter)
+      // For Full Check, we don't need PSIDs - they come from Google Feed
       if (checkMode === 'full') {
-        if (psids.trim()) {
-          psidList = psids
-            .split(/[,\n]/)
-            .map(p => p.trim())
-            .filter(p => p.length > 0)
-        } else {
-          psidList = Object.keys(nyceCsvData!)
-        }
+        psidList = [] // Will be populated from Google Feed out-of-stock items
       } else {
         // For Spot-check, PSIDs are required
         psidList = psids
@@ -210,7 +203,7 @@ export default function StockCheckerPage() {
           <form onSubmit={handleSubmit}>
             <div style={{ marginBottom: '1rem' }}>
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', color: '#374151' }}>
-                {checkMode === 'spot' ? 'Upload CSV or Enter PSIDs (Required)' : 'Filter PSIDs (Optional)'}
+                {checkMode === 'spot' ? 'Upload CSV or Enter PSIDs (Required)' : 'PSIDs (Not needed for Full Check)'}
               </label>
               {checkMode === 'spot' && (
                 <input
@@ -225,7 +218,7 @@ export default function StockCheckerPage() {
                 onChange={(e) => setPsids(e.target.value)}
                 placeholder={checkMode === 'spot'
                   ? "Enter PSIDs (comma or newline separated)"
-                  : "Optional: Enter specific PSIDs to check (leave empty to check all from NYCE CSV)"}
+                  : "Not needed - Full Check uses Google Feed out-of-stock items"}
                 rows={5}
                 style={{
                   width: '100%',
@@ -234,13 +227,15 @@ export default function StockCheckerPage() {
                   borderRadius: '4px',
                   fontSize: '1rem',
                   fontFamily: 'monospace',
-                  background: checkMode === 'full' ? '#f9fafb' : 'white'
+                  background: checkMode === 'full' ? '#f3f4f6' : 'white',
+                  cursor: checkMode === 'full' ? 'not-allowed' : 'text'
                 }}
+                disabled={checkMode === 'full'}
               />
               <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.5rem' }}>
                 {checkMode === 'spot'
                   ? 'Example: 38454, 3849, 3848 or one per line'
-                  : `Full Check: Leave empty to check all ${nyceCsvData ? Object.keys(nyceCsvData).length : '0'} items from NYCE CSV`}
+                  : 'Full Check automatically processes all items marked as out-of-stock in Google Feed'}
               </p>
             </div>
 
@@ -286,7 +281,7 @@ export default function StockCheckerPage() {
                     Full Check
                   </div>
                   <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
-                    Automatically checks all items from NYCE CSV that are NOT sellable in Google Feed
+                    Checks all out-of-stock items from Google Feed against NYCE, Fluent, and CommerceTools
                   </div>
                 </div>
               </label>

@@ -283,20 +283,21 @@ export async function POST(request: NextRequest) {
 
         // FULL CHECK MODE
         if (checkMode === 'full') {
-          sendEvent('progress', { message: 'Fetching Google Feed...', current: 0, total: psids.length })
+          sendEvent('progress', { message: 'Fetching Google Feed...', current: 0, total: 1 })
 
-          // Fetch Google Feed
+          // 1. Fetch Google Feed
           const googleFeedResponse = await fetch(process.env.NEXT_PUBLIC_GOOGLE_FEED_URL!)
           const googleProducts: GoogleFeedProduct[] = await googleFeedResponse.json()
-          const googleMap = new Map(googleProducts.map(p => [p.id, p]))
 
-          sendEvent('progress', { message: `Google Feed loaded: ${googleProducts.length} products`, current: 0, total: psids.length })
+          sendEvent('progress', { message: `Google Feed loaded: ${googleProducts.length} total products`, current: 0, total: 1 })
 
-          // Get Fluent token
-          sendEvent('progress', { message: 'Getting Fluent authentication...', current: 0, total: psids.length })
-          const fluentToken = await getFluentToken()
+          // 2. Filter to items that are NOT sellable (out of stock)
+          const notSellableProducts = googleProducts.filter(p => p.availability === 'out_of_stock')
+          const notSellablePsids = notSellableProducts.map(p => p.id)
 
-          // Process NYCE CSV data
+          sendEvent('progress', { message: `Found ${notSellableProducts.length} not-sellable items in Google Feed`, current: 0, total: notSellableProducts.length })
+
+          // 3. Process NYCE CSV data
           const nyceDataMap = new Map<string, any>()
           Object.keys(nyceCsvData!).forEach(sku => {
             nyceDataMap.set(sku, {
@@ -309,30 +310,35 @@ export async function POST(request: NextRequest) {
             })
           })
 
-          sendEvent('progress', { message: `NYCE data loaded: ${nyceDataMap.size} items`, current: 0, total: psids.length })
+          sendEvent('progress', { message: `NYCE data loaded: ${nyceDataMap.size} items from CSV`, current: 0, total: notSellableProducts.length })
 
-          // Process each PSID
+          // 4. Get Fluent token
+          sendEvent('progress', { message: 'Getting Fluent authentication...', current: 0, total: notSellableProducts.length })
+          const fluentToken = await getFluentToken()
+
+          // 5. For each not-sellable item, check if it's in NYCE CSV and process it
           let processedCount = 0
-          for (let i = 0; i < psids.length; i++) {
-            const psid = psids[i]
-            const googleProduct = googleMap.get(psid)
-            const googleSellable = googleProduct?.availability === 'in_stock'
+          let skippedCount = 0
 
-            // Skip sellable items
-            if (googleSellable) {
+          for (let i = 0; i < notSellablePsids.length; i++) {
+            const psid = notSellablePsids[i]
+
+            // Check if this PSID exists in NYCE CSV
+            if (!nyceDataMap.has(psid)) {
+              skippedCount++
               sendEvent('progress', {
-                message: `${psid} is sellable - skipping (${i + 1}/${psids.length})`,
+                message: `${psid} not in NYCE CSV - skipping (${i + 1}/${notSellablePsids.length})`,
                 current: i + 1,
-                total: psids.length
+                total: notSellablePsids.length
               })
               continue
             }
 
             processedCount++
             sendEvent('progress', {
-              message: `Checking ${psid} - NOT sellable (${i + 1}/${psids.length})...`,
+              message: `Checking ${psid} - NOT sellable (${i + 1}/${notSellablePsids.length})...`,
               current: i + 1,
-              total: psids.length
+              total: notSellablePsids.length
             })
 
             try {
@@ -386,7 +392,11 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          sendEvent('progress', { message: `Full Check complete: processed ${processedCount} not-sellable items`, current: psids.length, total: psids.length })
+          sendEvent('progress', {
+            message: `Full Check complete: ${notSellablePsids.length} not-sellable in Google Feed, ${processedCount} checked (${skippedCount} not in NYCE CSV)`,
+            current: notSellablePsids.length,
+            total: notSellablePsids.length
+          })
         }
         // SPOT-CHECK MODE
         else if (checkMode === 'spot') {
