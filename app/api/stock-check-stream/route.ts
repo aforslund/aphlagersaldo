@@ -298,16 +298,28 @@ export async function POST(request: NextRequest) {
           console.log('Fetching Google Feed from:', googleFeedUrl)
 
           if (!googleFeedUrl) {
-            throw new Error('NEXT_PUBLIC_GOOGLE_FEED_URL is not configured')
+            const error = 'NEXT_PUBLIC_GOOGLE_FEED_URL is not configured'
+            console.error(error)
+            sendEvent('error', { message: error })
+            throw new Error(error)
           }
 
-          const googleFeedResponse = await fetch(googleFeedUrl)
-          if (!googleFeedResponse.ok) {
-            throw new Error(`Google Feed fetch failed with status ${googleFeedResponse.status}`)
+          let googleProducts: GoogleFeedProduct[]
+          try {
+            const googleFeedResponse = await fetch(googleFeedUrl, {
+              signal: AbortSignal.timeout(30000) // 30 second timeout
+            })
+            if (!googleFeedResponse.ok) {
+              throw new Error(`Google Feed returned status ${googleFeedResponse.status}`)
+            }
+            googleProducts = await googleFeedResponse.json()
+            console.log('Google Feed loaded:', googleProducts.length, 'products')
+          } catch (error) {
+            const errorMsg = `Failed to fetch Google Feed: ${error instanceof Error ? error.message : String(error)}`
+            console.error(errorMsg, error)
+            sendEvent('error', { message: errorMsg })
+            throw new Error(errorMsg)
           }
-
-          const googleProducts: GoogleFeedProduct[] = await googleFeedResponse.json()
-          console.log('Google Feed loaded:', googleProducts.length, 'products')
 
           sendEvent('progress', { message: `Google Feed loaded: ${googleProducts.length} total products`, current: 0, total: 1 })
 
@@ -355,8 +367,11 @@ export async function POST(request: NextRequest) {
             console.log('Fluent token acquired successfully')
             sendEvent('progress', { message: 'Fluent authentication successful', current: 0, total: notSellableProducts.length })
           } catch (error) {
-            console.error('Fluent authentication failed:', error)
-            throw new Error(`Fluent authentication failed: ${error}`)
+            const errorMsg = `Fluent authentication failed: ${error instanceof Error ? error.message : String(error)}`
+            console.error(errorMsg, error)
+            sendEvent('error', { message: errorMsg })
+            sendEvent('error', { message: 'Check FLUENT_ENDPOINT, FLUENT_USERNAME, FLUENT_PASSWORD, FLUENT_CLIENT_ID, FLUENT_CLIENT_SECRET environment variables' })
+            throw new Error(errorMsg)
           }
 
           // 5. For each not-sellable item, check if it's in NYCE CSV and process it
@@ -545,7 +560,15 @@ export async function POST(request: NextRequest) {
         controller.close()
 
       } catch (error) {
-        sendEvent('error', { message: `Fatal error: ${error}` })
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        console.error('Fatal error in stock check:', errorMessage, error)
+        sendEvent('error', { message: `Fatal error: ${errorMessage}` })
+
+        // Provide helpful debugging info
+        if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+          sendEvent('error', { message: 'Network error - check that all API endpoints are accessible and environment variables are correctly set' })
+        }
+
         controller.close()
       }
     },

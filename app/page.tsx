@@ -163,7 +163,10 @@ export default function StockCheckerPage() {
         }
       }
     } catch (error) {
-      alert('Error checking stock: ' + error)
+      console.error('Stock check error:', error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      setErrors(prev => [...prev, `Error checking stock: ${errorMessage}`])
+      alert('Error checking stock: ' + errorMessage)
     } finally {
       setLoading(false)
       setProgressMessage('')
@@ -421,17 +424,39 @@ export default function StockCheckerPage() {
         {errors.length > 0 && (
           <div style={{
             background: '#fee2e2',
-            border: '1px solid #fca5a5',
+            border: '2px solid #ef4444',
             borderRadius: '8px',
-            padding: '1rem',
-            marginBottom: '2rem'
+            padding: '1.5rem',
+            marginBottom: '2rem',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
           }}>
-            <h3 style={{ fontWeight: 'bold', color: '#991b1b', marginBottom: '0.5rem' }}>Errors:</h3>
-            <ul style={{ listStyle: 'disc', paddingLeft: '1.5rem', color: '#991b1b' }}>
-              {errors.map((error, i) => (
-                <li key={i}>{error}</li>
-              ))}
-            </ul>
+            <h3 style={{ fontWeight: 'bold', color: '#991b1b', marginBottom: '1rem', fontSize: '1.125rem' }}>
+              ⚠️ Errors Occurred ({errors.length})
+            </h3>
+            <div style={{ background: 'white', borderRadius: '4px', padding: '1rem' }}>
+              <ul style={{ listStyle: 'none', paddingLeft: '0', color: '#991b1b', margin: 0 }}>
+                {errors.map((error, i) => (
+                  <li key={i} style={{
+                    marginBottom: '0.5rem',
+                    paddingBottom: '0.5rem',
+                    borderBottom: i < errors.length - 1 ? '1px solid #fecaca' : 'none',
+                    fontSize: '0.875rem',
+                    fontFamily: 'monospace'
+                  }}>
+                    <strong>{i + 1}.</strong> {error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div style={{ marginTop: '1rem', fontSize: '0.75rem', color: '#7f1d1d', background: '#fef2f2', padding: '0.75rem', borderRadius: '4px' }}>
+              <strong>Troubleshooting tips:</strong>
+              <ul style={{ margin: '0.5rem 0 0 0', paddingLeft: '1.25rem' }}>
+                <li>Check that all environment variables are set correctly</li>
+                <li>Verify API endpoints are accessible</li>
+                <li>Check browser console for detailed error logs</li>
+                <li>Ensure NYCE CSV is properly formatted (SKU, Balance, InOrder columns)</li>
+              </ul>
+            </div>
           </div>
         )}
 
