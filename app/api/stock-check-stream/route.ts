@@ -103,26 +103,23 @@ function addNyceInsights(
   nycePhysical: number,
   nyceOnHand: number,
   nyceInOrder: number,
-  nyceStoppedQty: number,
-  nyceAvailable: number,
+  nyceUnallocated: number,
   fluentStock: number
 ) {
   if (nycePhysical > nyceOnHand && nycePhysical - nyceOnHand > 10) {
     details.push(`STAGING BACKLOG: ${nycePhysical - nyceOnHand} units in physical but not onHand (being put away)`)
   }
 
-  if (nyceStoppedQty > 0) {
-    details.push(`STOPPED STOCK: ${nyceStoppedQty} units stopped (possibly moved to inspection)`)
-  }
-
-  if (nyceInOrder < 5 && nyceStoppedQty > 20) {
-    details.push(`POSSIBLE INSPECTION: Low inOrder (${nyceInOrder}) but high stopped qty (${nyceStoppedQty})`)
-  }
-
-  const difference = Math.abs(nyceAvailable - fluentStock)
-  if (difference > 5) {
-    details.push(`SYNC VARIANCE: NYCE available (${nyceAvailable}) vs Fluent (${fluentStock}) - difference of ${difference} units`)
-    details.push('Note: Fluent is typically ahead as it releases to NYCE only when ready for picking')
+  // Compare NYCE unallocated with Fluent
+  const difference = nyceUnallocated - fluentStock
+  if (difference > 10) {
+    details.push(`SYNC VARIANCE: NYCE unallocated (${nyceUnallocated}) is ${difference} units higher than Fluent (${fluentStock})`)
+    details.push('Possible issue: Check if Fluent is properly receiving stock from NYCE')
+  } else if (difference > 0 && difference <= 10) {
+    details.push(`MINOR VARIANCE: NYCE unallocated (${nyceUnallocated}) is ${difference} units higher than Fluent (${fluentStock}) - within acceptable range`)
+  } else if (difference < 0 && Math.abs(difference) > 10) {
+    details.push(`REVERSE VARIANCE: Fluent (${fluentStock}) is ${Math.abs(difference)} units higher than NYCE unallocated (${nyceUnallocated})`)
+    details.push('Note: Fluent may have sold items that NYCE has not yet processed')
   }
 }
 
@@ -130,42 +127,42 @@ function addNyceInsights(
 function analyzeStockFull(
   psid: string,
   productName: string,
+  productUrl: string | null,
   commerceToolsStock: number,
   fluentStock: number,
   nyceArticle: any
 ): ProductStockResult {
   const details: string[] = []
   let analysis = ''
-  const status: 'ok' | 'issue' = 'issue'
+  let status: 'ok' | 'issue' | 'warning' = 'issue'
 
   const nyceOnHand = nyceArticle?.onHandQty || 0
   const nyceInOrder = nyceArticle?.inOrderQty || 0
   const nycePhysical = nyceArticle?.physicalQty || 0
-  const nyceStoppedQty = nyceArticle?.stoppedQty || 0
-  const nyceAvailable = nyceOnHand - nyceInOrder
+  const nyceUnallocated = nyceOnHand - nyceInOrder  // This is what NYCE sees as totally unallocated
 
   details.push('Google Feed: NOT SELLABLE (Full Check mode)')
 
-  // Apply the 4-scenario matrix
-  if (commerceToolsStock > 0 && fluentStock > 0 && nyceOnHand > 0) {
+  // Apply the 4-scenario matrix using NYCE unallocated
+  if (commerceToolsStock > 0 && fluentStock > 0 && nyceUnallocated > 0) {
     analysis = 'TROLIGTVIS EN SPÄRR (Probably a block)'
     details.push('All systems have stock but Google Feed shows not sellable')
     details.push('This indicates a business logic block/restriction (affärslogik spärr)')
     details.push('Action: Check business rules and restrictions in Google Feed logic')
   }
-  else if (commerceToolsStock === 0 && fluentStock > 0 && nyceOnHand > 0) {
+  else if (commerceToolsStock === 0 && fluentStock > 0 && nyceUnallocated > 0) {
     analysis = 'TROLIGTVIS SYNKPROBLEM (Probably sync problem)'
-    details.push(`CommerceTools shows 0 but Fluent has ${fluentStock} and NYCE has ${nyceOnHand}`)
+    details.push(`CommerceTools shows 0 but Fluent has ${fluentStock} and NYCE unallocated has ${nyceUnallocated}`)
     details.push('CommerceTools should mirror Fluent with some delay')
     details.push('Action: Check CommerceTools sync process with Fluent')
   }
-  else if (commerceToolsStock === 0 && fluentStock === 0 && nyceOnHand > 0) {
+  else if (commerceToolsStock === 0 && fluentStock === 0 && nyceUnallocated > 0) {
     analysis = 'LAGERSYNKPROBLEM ELLER UTSÅLT (Inventory sync problem or sold out)'
-    details.push(`NYCE has ${nyceOnHand} units but Fluent shows 0`)
+    details.push(`NYCE has ${nyceUnallocated} unallocated units but Fluent shows 0`)
     details.push('Either stock sync issue from NYCE to Fluent or items not digitally sellable')
     details.push('Action: Check if stock is available for digital sales in NYCE')
   }
-  else if (commerceToolsStock === 0 && fluentStock === 0 && nyceOnHand === 0) {
+  else if (commerceToolsStock === 0 && fluentStock === 0 && nyceUnallocated === 0) {
     analysis = 'EJ INLEVERAT? (Not delivered?)'
     details.push('No stock in any system')
     details.push('Product may not have been delivered to warehouse yet')
@@ -173,16 +170,25 @@ function analyzeStockFull(
   }
   else {
     analysis = 'INVESTIGATE - Stock pattern not matching standard scenarios'
-    details.push(`CT: ${commerceToolsStock}, Fluent: ${fluentStock}, NYCE: ${nyceOnHand}`)
+    details.push(`CT: ${commerceToolsStock}, Fluent: ${fluentStock}, NYCE unallocated: ${nyceUnallocated}`)
+  }
+
+  // Check if Fluent and NYCE are in sync (within acceptable variance)
+  const syncDiff = nyceUnallocated - fluentStock
+  if (syncDiff > 0 && syncDiff <= 10) {
+    status = 'warning'  // Orange - minor acceptable variance
+  } else if (syncDiff > 10) {
+    status = 'issue'  // Red - significant variance
   }
 
   if (nyceArticle) {
-    addNyceInsights(details, nycePhysical, nyceOnHand, nyceInOrder, nyceStoppedQty, nyceAvailable, fluentStock)
+    addNyceInsights(details, nycePhysical, nyceOnHand, nyceInOrder, nyceUnallocated, fluentStock)
   }
 
   return {
     psid,
     productName,
+    productUrl,
     googleSellable: false,
     commerceToolsStock,
     fluentStock,
@@ -197,6 +203,7 @@ function analyzeStockFull(
 function analyzeStockSpot(
   psid: string,
   productName: string,
+  productUrl: string | null,
   commerceToolsStock: number,
   fluentStock: number
 ): ProductStockResult {
@@ -237,6 +244,7 @@ function analyzeStockSpot(
   return {
     psid,
     productName,
+    productUrl,
     googleSellable: null,
     commerceToolsStock,
     fluentStock,
@@ -286,16 +294,41 @@ export async function POST(request: NextRequest) {
           sendEvent('progress', { message: 'Fetching Google Feed...', current: 0, total: 1 })
 
           // 1. Fetch Google Feed
-          const googleFeedResponse = await fetch(process.env.NEXT_PUBLIC_GOOGLE_FEED_URL!)
+          const googleFeedUrl = process.env.NEXT_PUBLIC_GOOGLE_FEED_URL
+          console.log('Fetching Google Feed from:', googleFeedUrl)
+
+          if (!googleFeedUrl) {
+            throw new Error('NEXT_PUBLIC_GOOGLE_FEED_URL is not configured')
+          }
+
+          const googleFeedResponse = await fetch(googleFeedUrl)
+          if (!googleFeedResponse.ok) {
+            throw new Error(`Google Feed fetch failed with status ${googleFeedResponse.status}`)
+          }
+
           const googleProducts: GoogleFeedProduct[] = await googleFeedResponse.json()
+          console.log('Google Feed loaded:', googleProducts.length, 'products')
 
           sendEvent('progress', { message: `Google Feed loaded: ${googleProducts.length} total products`, current: 0, total: 1 })
 
           // 2. Filter to items that are NOT sellable (out of stock)
-          const notSellableProducts = googleProducts.filter(p => p.availability === 'out_of_stock')
-          const notSellablePsids = notSellableProducts.map(p => p.id)
+          const notSellableProducts = googleProducts.filter(p => p.Availability === 'out_of_stock')
+          const notSellablePsids = notSellableProducts.map(p => p.Id)
+
+          // Create a map for easy lookup of product details
+          const googleProductMap = new Map<string, GoogleFeedProduct>()
+          googleProducts.forEach(p => googleProductMap.set(p.Id, p))
+
+          console.log('Not sellable products:', notSellablePsids.length, 'items')
 
           sendEvent('progress', { message: `Found ${notSellableProducts.length} not-sellable items in Google Feed`, current: 0, total: notSellableProducts.length })
+
+          if (notSellableProducts.length === 0) {
+            sendEvent('progress', { message: 'No out-of-stock items found in Google Feed. Nothing to check!', current: 0, total: 0 })
+            sendEvent('complete', { results: [], errors: [], total: 0 })
+            controller.close()
+            return
+          }
 
           // 3. Process NYCE CSV data
           const nyceDataMap = new Map<string, any>()
@@ -314,11 +347,49 @@ export async function POST(request: NextRequest) {
 
           // 4. Get Fluent token
           sendEvent('progress', { message: 'Getting Fluent authentication...', current: 0, total: notSellableProducts.length })
-          const fluentToken = await getFluentToken()
+          console.log('Attempting to get Fluent token...')
+
+          let fluentToken: string
+          try {
+            fluentToken = await getFluentToken()
+            console.log('Fluent token acquired successfully')
+            sendEvent('progress', { message: 'Fluent authentication successful', current: 0, total: notSellableProducts.length })
+          } catch (error) {
+            console.error('Fluent authentication failed:', error)
+            throw new Error(`Fluent authentication failed: ${error}`)
+          }
 
           // 5. For each not-sellable item, check if it's in NYCE CSV and process it
           let processedCount = 0
           let skippedCount = 0
+          let itemsWithUnallocatedStock = 0
+
+          // Count how many out-of-stock items are actually in the NYCE CSV
+          const itemsToProcess = notSellablePsids.filter(psid => nyceDataMap.has(psid))
+          console.log(`Out of ${notSellablePsids.length} not-sellable items, ${itemsToProcess.length} are in NYCE CSV`)
+          sendEvent('progress', {
+            message: `Processing ${itemsToProcess.length} items that are both out-of-stock AND in NYCE...`,
+            current: 0,
+            total: notSellablePsids.length
+          })
+
+          if (itemsToProcess.length === 0) {
+            sendEvent('progress', { message: 'No out-of-stock items found in NYCE CSV. Check complete.', current: 0, total: 0 })
+            sendEvent('complete', {
+              results: [],
+              errors: [],
+              total: 0,
+              summary: {
+                totalGoogleFeedItems: googleProducts.length,
+                notSellableCount: notSellablePsids.length,
+                nyceCsvCount: nyceDataMap.size,
+                overlapCount: 0,
+                itemsWithUnallocatedStock: 0
+              }
+            })
+            controller.close()
+            return
+          }
 
           for (let i = 0; i < notSellablePsids.length; i++) {
             const psid = notSellablePsids[i]
@@ -371,13 +442,25 @@ export async function POST(request: NextRequest) {
               const autocompleteData: AutocompleteResponse = await autocompleteResponse.json()
 
               const matchedProduct = autocompleteData.products.find(p => p.variant && p.variant.sku === psid)
-              const productName = matchedProduct?.productName || 'Unknown Product'
               const commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
+
+              // Get product details from Google Feed
+              const googleProduct = googleProductMap.get(psid)
+              const productName = googleProduct?.Title || matchedProduct?.productName || 'Unknown Product'
+              const productUrl = googleProduct?.Link || matchedProduct?.url || null
 
               const nyceArticle = nyceDataMap.get(psid) || null
 
+              // Count items with unallocated stock
+              if (nyceArticle) {
+                const nyceUnallocated = nyceArticle.onHandQty - nyceArticle.inOrderQty
+                if (nyceUnallocated > 0) {
+                  itemsWithUnallocatedStock++
+                }
+              }
+
               // Analyze using Full Check logic (from stock-check/route.ts)
-              const result = analyzeStockFull(psid, productName, commerceToolsStock, fluentStock, nyceArticle)
+              const result = analyzeStockFull(psid, productName, productUrl, commerceToolsStock, fluentStock, nyceArticle)
               results.push(result)
               sendEvent('result', { result })
 
@@ -396,6 +479,15 @@ export async function POST(request: NextRequest) {
             message: `Full Check complete: ${notSellablePsids.length} not-sellable in Google Feed, ${processedCount} checked (${skippedCount} not in NYCE CSV)`,
             current: notSellablePsids.length,
             total: notSellablePsids.length
+          })
+
+          // Send summary statistics for Full Check mode
+          sendEvent('summary', {
+            totalGoogleFeedItems: googleProducts.length,
+            notSellableCount: notSellablePsids.length,
+            nyceCsvCount: nyceDataMap.size,
+            overlapCount: itemsToProcess.length,
+            itemsWithUnallocatedStock: itemsWithUnallocatedStock
           })
         }
         // SPOT-CHECK MODE
@@ -432,10 +524,11 @@ export async function POST(request: NextRequest) {
               )
 
               const productName = matchedProduct?.productName || 'Unknown Product'
+              const productUrl = matchedProduct?.url || null
               const commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
               const fluentStock = fluentMap.get(psid) || 0
 
-              const result = analyzeStockSpot(psid, productName, commerceToolsStock, fluentStock)
+              const result = analyzeStockSpot(psid, productName, productUrl, commerceToolsStock, fluentStock)
               results.push(result)
 
               sendEvent('result', { result })

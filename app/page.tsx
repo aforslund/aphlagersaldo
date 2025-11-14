@@ -16,6 +16,8 @@ export default function StockCheckerPage() {
   const [progressTotal, setProgressTotal] = useState(0)
   const [checkMode, setCheckMode] = useState<'full' | 'spot'>('spot')
   const [nyceCsvData, setNyceCsvData] = useState<any>(null)
+  const [summaryStats, setSummaryStats] = useState<any>(null)
+  const [sortBy, setSortBy] = useState<'none' | 'nyce' | 'fluent' | 'ct'>('none')
   const router = useRouter()
 
   const handlePsidFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -73,6 +75,7 @@ export default function StockCheckerPage() {
     setLoading(true)
     setResults([])
     setErrors([])
+    setSummaryStats(null)
     setProgressMessage('Initializing...')
     setProgressCurrent(0)
     setProgressTotal(0)
@@ -149,6 +152,8 @@ export default function StockCheckerPage() {
               } else if (data.type === 'error') {
                 tempErrors.push(data.message)
                 setErrors([...tempErrors])
+              } else if (data.type === 'summary') {
+                setSummaryStats(data)
               } else if (data.type === 'complete') {
                 setResults(data.results)
                 setErrors(data.errors)
@@ -171,8 +176,26 @@ export default function StockCheckerPage() {
     router.refresh()
   }
 
-  const okResults = results.filter(r => r.status === 'ok')
-  const issueResults = results.filter(r => r.status === 'issue')
+  // Sort results based on selected criteria
+  const getSortedResults = (resultsToSort: ProductStockResult[]) => {
+    if (sortBy === 'none') return resultsToSort
+
+    return [...resultsToSort].sort((a, b) => {
+      if (sortBy === 'nyce') {
+        const aUnallocated = a.nyceStock ? (a.nyceStock.onHandQty - a.nyceStock.inOrderQty) : 0
+        const bUnallocated = b.nyceStock ? (b.nyceStock.onHandQty - b.nyceStock.inOrderQty) : 0
+        return bUnallocated - aUnallocated  // Descending order
+      } else if (sortBy === 'fluent') {
+        return b.fluentStock - a.fluentStock  // Descending order
+      } else if (sortBy === 'ct') {
+        return b.commerceToolsStock - a.commerceToolsStock  // Descending order
+      }
+      return 0
+    })
+  }
+
+  const okResults = getSortedResults(results.filter(r => r.status === 'ok'))
+  const issueResults = getSortedResults(results.filter(r => r.status === 'issue' || r.status === 'warning'))
 
   return (
     <div style={{ minHeight: '100vh', background: '#f3f4f6', padding: '2rem' }}>
@@ -402,7 +425,48 @@ export default function StockCheckerPage() {
         {/* Results */}
         {results.length > 0 && (
           <div>
-            {/* Summary */}
+            {/* Summary Statistics (Full Check Only) */}
+            {summaryStats && (
+              <div style={{
+                background: '#f0f9ff',
+                border: '2px solid #3b82f6',
+                padding: '1.5rem',
+                borderRadius: '8px',
+                marginBottom: '1rem'
+              }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: 'bold', marginBottom: '1rem', color: '#1e40af' }}>
+                  Full Check Summary
+                </h3>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                  gap: '1rem'
+                }}>
+                  <div style={{ padding: '0.75rem', background: 'white', borderRadius: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>Total Google Feed Items</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: '#1f2937' }}>{summaryStats.totalGoogleFeedItems?.toLocaleString()}</div>
+                  </div>
+                  <div style={{ padding: '0.75rem', background: 'white', borderRadius: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>Not Sellable in Feed</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: '#ef4444' }}>{summaryStats.notSellableCount?.toLocaleString()}</div>
+                  </div>
+                  <div style={{ padding: '0.75rem', background: 'white', borderRadius: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>Items in NYCE CSV</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: '#8b5cf6' }}>{summaryStats.nyceCsvCount?.toLocaleString()}</div>
+                  </div>
+                  <div style={{ padding: '0.75rem', background: 'white', borderRadius: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>Overlap (Out-of-Stock + in NYCE)</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: '#f59e0b' }}>{summaryStats.overlapCount?.toLocaleString()}</div>
+                  </div>
+                  <div style={{ padding: '0.75rem', background: 'white', borderRadius: '6px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>Items with Unallocated Stock</div>
+                    <div style={{ fontSize: '1.75rem', fontWeight: 'bold', color: '#10b981' }}>{summaryStats.itemsWithUnallocatedStock?.toLocaleString()}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Results Summary */}
             <div style={{
               background: 'white',
               padding: '1rem',
@@ -410,19 +474,87 @@ export default function StockCheckerPage() {
               boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
               marginBottom: '1rem',
               display: 'flex',
-              gap: '2rem'
+              justifyContent: 'space-between',
+              alignItems: 'center'
             }}>
-              <div>
-                <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>Total Checked:</span>
-                <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem' }}>{results.length}</span>
+              <div style={{ display: 'flex', gap: '2rem' }}>
+                <div>
+                  <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>Total Checked:</span>
+                  <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem' }}>{results.length}</span>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.875rem', color: '#10b981' }}>OK:</span>
+                  <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem', color: '#10b981' }}>{okResults.length}</span>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.875rem', color: '#ef4444' }}>Issues:</span>
+                  <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem', color: '#ef4444' }}>{issueResults.length}</span>
+                </div>
               </div>
-              <div>
-                <span style={{ fontSize: '0.875rem', color: '#10b981' }}>OK:</span>
-                <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem', color: '#10b981' }}>{okResults.length}</span>
-              </div>
-              <div>
-                <span style={{ fontSize: '0.875rem', color: '#ef4444' }}>Issues:</span>
-                <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem', color: '#ef4444' }}>{issueResults.length}</span>
+
+              {/* Sorting Controls */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Sort by:</span>
+                <button
+                  onClick={() => setSortBy('none')}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    background: sortBy === 'none' ? '#667eea' : 'white',
+                    color: sortBy === 'none' ? 'white' : '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    fontWeight: sortBy === 'none' ? '600' : '400'
+                  }}
+                >
+                  Default
+                </button>
+                <button
+                  onClick={() => setSortBy('nyce')}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    background: sortBy === 'nyce' ? '#667eea' : 'white',
+                    color: sortBy === 'nyce' ? 'white' : '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    fontWeight: sortBy === 'nyce' ? '600' : '400'
+                  }}
+                >
+                  NYCE ↓
+                </button>
+                <button
+                  onClick={() => setSortBy('fluent')}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    background: sortBy === 'fluent' ? '#667eea' : 'white',
+                    color: sortBy === 'fluent' ? 'white' : '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    fontWeight: sortBy === 'fluent' ? '600' : '400'
+                  }}
+                >
+                  Fluent ↓
+                </button>
+                <button
+                  onClick={() => setSortBy('ct')}
+                  style={{
+                    padding: '0.25rem 0.75rem',
+                    background: sortBy === 'ct' ? '#667eea' : 'white',
+                    color: sortBy === 'ct' ? 'white' : '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    fontWeight: sortBy === 'ct' ? '600' : '400'
+                  }}
+                >
+                  CT ↓
+                </button>
               </div>
             </div>
 
@@ -484,119 +616,137 @@ export default function StockCheckerPage() {
 
 function ResultCard({ result }: { result: ProductStockResult }) {
   const isOk = result.status === 'ok'
+  const isWarning = result.status === 'warning'
+  const isIssue = result.status === 'issue'
+
+  // Color schemes
+  const borderColor = isOk ? '#10b981' : isWarning ? '#f59e0b' : '#ef4444'
+  const badgeBackground = isOk ? '#d1fae5' : isWarning ? '#fef3c7' : '#fee2e2'
+  const badgeColor = isOk ? '#065f46' : isWarning ? '#92400e' : '#991b1b'
+  const analysisBackground = isOk ? '#ecfdf5' : isWarning ? '#fffbeb' : '#fef2f2'
 
   return (
     <div style={{
       background: 'white',
-      border: `2px solid ${isOk ? '#10b981' : '#ef4444'}`,
-      borderRadius: '8px',
-      padding: '1.5rem',
-      marginBottom: '1rem',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+      borderLeft: `4px solid ${borderColor}`,
+      borderBottom: '1px solid #e5e7eb',
+      padding: '0.75rem',
+      marginBottom: '0.25rem'
     }}>
-      {/* Header */}
-      <div style={{ marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.5rem' }}>
-          <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937' }}>
-              {result.psid}
-            </h3>
-            <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>{result.productName}</p>
-          </div>
-          <span style={{
-            padding: '0.25rem 0.75rem',
-            background: isOk ? '#d1fae5' : '#fee2e2',
-            color: isOk ? '#065f46' : '#991b1b',
-            borderRadius: '9999px',
-            fontSize: '0.75rem',
-            fontWeight: '600'
-          }}>
-            {result.status.toUpperCase()}
-          </span>
+      {/* Excel-like header row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: '1rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+        <div style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: '#6b7280' }}>
+          {result.psid}
         </div>
+        <div>
+          {result.productUrl ? (
+            <a
+              href={result.productUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontSize: '0.875rem',
+                fontWeight: '700',
+                color: '#2563eb',
+                textDecoration: 'none'
+              }}
+              onMouseOver={(e) => e.currentTarget.style.textDecoration = 'underline'}
+              onMouseOut={(e) => e.currentTarget.style.textDecoration = 'none'}
+            >
+              {result.productName}
+            </a>
+          ) : (
+            <span style={{ fontSize: '0.875rem', fontWeight: '700', color: '#1f2937' }}>
+              {result.productName}
+            </span>
+          )}
+        </div>
+        <span style={{
+          padding: '0.125rem 0.5rem',
+          background: badgeBackground,
+          color: badgeColor,
+          borderRadius: '4px',
+          fontSize: '0.625rem',
+          fontWeight: '600',
+          textTransform: 'uppercase'
+        }}>
+          {result.status}
+        </span>
       </div>
 
-      {/* Stock Levels */}
+      {/* Stock table-like display */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-        gap: '1rem',
-        marginBottom: '1rem',
-        padding: '1rem',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
+        gap: '0.75rem',
+        fontSize: '0.75rem',
+        marginBottom: '0.5rem',
+        padding: '0.5rem',
         background: '#f9fafb',
         borderRadius: '4px'
       }}>
-        <div>
-          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>Google Feed</div>
-          <div style={{ fontWeight: 'bold', color: result.googleSellable === null ? '#6b7280' : (result.googleSellable ? '#10b981' : '#ef4444') }}>
-            {result.googleSellable === null ? 'SKIPPED' : (result.googleSellable ? 'SELLABLE' : 'NOT SELLABLE')}
+        {result.googleSellable !== null && (
+          <div>
+            <div style={{ color: '#6b7280', fontSize: '0.65rem', marginBottom: '0.125rem' }}>Google</div>
+            <div style={{ fontWeight: '600', color: result.googleSellable ? '#10b981' : '#ef4444' }}>
+              {result.googleSellable ? 'Sellable' : 'Not Sellable'}
+            </div>
           </div>
-        </div>
+        )}
         <div>
-          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>CommerceTools</div>
-          <div style={{ fontWeight: 'bold', color: result.commerceToolsStock > 0 ? '#10b981' : '#ef4444' }}>
+          <div style={{ color: '#6b7280', fontSize: '0.65rem', marginBottom: '0.125rem' }}>CT Stock</div>
+          <div style={{ fontWeight: '600', color: result.commerceToolsStock > 0 ? '#10b981' : '#ef4444' }}>
             {result.commerceToolsStock}
           </div>
         </div>
         <div>
-          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>Fluent</div>
-          <div style={{ fontWeight: 'bold', color: result.fluentStock > 0 ? '#10b981' : '#ef4444' }}>
+          <div style={{ color: '#6b7280', fontSize: '0.65rem', marginBottom: '0.125rem' }}>Fluent Stock</div>
+          <div style={{ fontWeight: '600', color: result.fluentStock > 0 ? '#10b981' : '#ef4444' }}>
             {result.fluentStock}
           </div>
         </div>
-        <div>
-          <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '0.25rem' }}>NYCE OnHand</div>
-          <div style={{ fontWeight: 'bold', color: (result.nyceStock?.onHandQty || 0) > 0 ? '#10b981' : '#ef4444' }}>
-            {result.nyceStock?.onHandQty || 0}
-          </div>
-        </div>
+        {result.nyceStock && (
+          <>
+            <div>
+              <div style={{ color: '#6b7280', fontSize: '0.65rem', marginBottom: '0.125rem' }}>NYCE OnHand</div>
+              <div style={{ fontWeight: '600', color: result.nyceStock.onHandQty > 0 ? '#10b981' : '#ef4444' }}>
+                {result.nyceStock.onHandQty}
+              </div>
+            </div>
+            <div>
+              <div style={{ color: '#6b7280', fontSize: '0.65rem', marginBottom: '0.125rem' }}>NYCE InOrder</div>
+              <div style={{ fontWeight: '600' }}>{result.nyceStock.inOrderQty}</div>
+            </div>
+            <div>
+              <div style={{ color: '#6b7280', fontSize: '0.65rem', marginBottom: '0.125rem' }}>NYCE Unallocated</div>
+              <div style={{ fontWeight: '600', color: (result.nyceStock.onHandQty - result.nyceStock.inOrderQty) > 0 ? '#10b981' : '#ef4444' }}>
+                {result.nyceStock.onHandQty - result.nyceStock.inOrderQty}
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Analysis */}
+      {/* Analysis - Compact */}
       {result.analysis && (
         <div style={{
-          padding: '1rem',
-          background: isOk ? '#ecfdf5' : '#fef2f2',
-          borderLeft: `4px solid ${isOk ? '#10b981' : '#ef4444'}`,
-          marginBottom: '1rem'
-        }}>
-          <div style={{ fontWeight: '600', marginBottom: '0.5rem', color: '#1f2937' }}>Analysis:</div>
-          <div style={{ color: '#374151' }}>{result.analysis}</div>
-        </div>
-      )}
-
-      {/* Details */}
-      {result.details.length > 0 && (
-        <div>
-          <div style={{ fontWeight: '600', marginBottom: '0.5rem', fontSize: '0.875rem', color: '#1f2937' }}>
-            Details:
-          </div>
-          <ul style={{ listStyle: 'disc', paddingLeft: '1.5rem', fontSize: '0.875rem', color: '#374151' }}>
-            {result.details.map((detail, i) => (
-              <li key={i} style={{ marginBottom: '0.25rem' }}>{detail}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* NYCE Details */}
-      {result.nyceStock && (
-        <div style={{
-          marginTop: '1rem',
-          padding: '1rem',
-          background: '#f9fafb',
+          fontSize: '0.75rem',
+          color: '#374151',
+          padding: '0.5rem',
+          background: analysisBackground,
           borderRadius: '4px',
-          fontSize: '0.875rem'
+          marginBottom: '0.5rem'
         }}>
-          <div style={{ fontWeight: '600', marginBottom: '0.5rem', color: '#1f2937' }}>NYCE Stock Details:</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '0.5rem' }}>
-            <div><span style={{ color: '#6b7280' }}>Physical:</span> <strong>{result.nyceStock.physicalQty}</strong></div>
-            <div><span style={{ color: '#6b7280' }}>OnHand:</span> <strong>{result.nyceStock.onHandQty}</strong></div>
-            <div><span style={{ color: '#6b7280' }}>InOrder:</span> <strong>{result.nyceStock.inOrderQty}</strong></div>
-            <div><span style={{ color: '#6b7280' }}>Stopped:</span> <strong>{result.nyceStock.stoppedQty}</strong></div>
-            <div><span style={{ color: '#6b7280' }}>Allocated:</span> <strong>{result.nyceStock.allocatedQty}</strong></div>
-            <div><span style={{ color: '#6b7280' }}>Available:</span> <strong>{result.nyceStock.onHandQty - result.nyceStock.inOrderQty}</strong></div>
-          </div>
+          <strong>{result.analysis}</strong>
+        </div>
+      )}
+
+      {/* Details - Compact list */}
+      {result.details.length > 0 && (
+        <div style={{ fontSize: '0.7rem', color: '#6b7280' }}>
+          {result.details.map((detail, i) => (
+            <div key={i} style={{ marginBottom: '0.125rem' }}>• {detail}</div>
+          ))}
         </div>
       )}
     </div>

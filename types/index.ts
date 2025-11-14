@@ -1,6 +1,9 @@
 export interface GoogleFeedProduct {
-  id: string
-  availability: 'in_stock' | 'out_of_stock'
+  Id: string
+  Availability: 'in_stock' | 'out_of_stock'
+  Title: string
+  Link: string
+  Price?: string
 }
 
 export interface AutocompleteProduct {
@@ -63,11 +66,12 @@ export interface StockCheckRequest {
 export interface ProductStockResult {
   psid: string
   productName: string
+  productUrl: string | null
   googleSellable: boolean | null
   commerceToolsStock: number
   fluentStock: number
   nyceStock: NyceArticle | null
-  status: 'ok' | 'issue'
+  status: 'ok' | 'issue' | 'warning'
   analysis: string
   details: string[]
 }
