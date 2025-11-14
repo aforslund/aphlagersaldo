@@ -163,10 +163,11 @@ function analyzeStockFull(
     details.push('Action: Check if stock is available for digital sales in NYCE')
   }
   else if (commerceToolsStock === 0 && fluentStock === 0 && nyceUnallocated === 0) {
-    analysis = 'EJ INLEVERAT? (Not delivered?)'
-    details.push('No stock in any system')
-    details.push('Product may not have been delivered to warehouse yet')
-    details.push('Action: Check delivery status and inbound shipments')
+    analysis = 'EJ INLEVERAT - DATA OK (Not delivered - data consistent)'
+    status = 'ok'  // This is actually OK - all systems agree there's no stock
+    details.push('All systems correctly show 0 stock')
+    details.push('Product may not have been delivered to warehouse yet, but data is consistent')
+    details.push('Note: Purchasing should verify if delivery is expected')
   }
   else {
     analysis = 'INVESTIGATE - Stock pattern not matching standard scenarios'
@@ -312,12 +313,21 @@ export async function POST(request: NextRequest) {
             if (!googleFeedResponse.ok) {
               throw new Error(`Google Feed returned status ${googleFeedResponse.status}`)
             }
-            googleProducts = await googleFeedResponse.json()
-            console.log('Google Feed loaded:', googleProducts.length, 'products')
+
+            // Get the raw text first to better debug JSON parsing errors
+            const rawText = await googleFeedResponse.text()
+            try {
+              googleProducts = JSON.parse(rawText)
+              console.log('Google Feed loaded:', googleProducts.length, 'products')
+            } catch (jsonError) {
+              console.error('Google Feed JSON parsing failed. First 200 chars:', rawText.substring(0, 200))
+              throw new Error(`Google Feed returned invalid JSON: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`)
+            }
           } catch (error) {
             const errorMsg = `Failed to fetch Google Feed: ${error instanceof Error ? error.message : String(error)}`
             console.error(errorMsg, error)
             sendEvent('error', { message: errorMsg })
+            sendEvent('error', { message: `Google Feed URL: ${googleFeedUrl}` })
             throw new Error(errorMsg)
           }
 
@@ -453,11 +463,30 @@ export async function POST(request: NextRequest) {
 
               // Get autocomplete data
               const autocompleteUrl = `${process.env.NEXT_PUBLIC_AUTOCOMPLETE_URL}?language=sv-SE&q=${psid}`
-              const autocompleteResponse = await fetch(autocompleteUrl)
-              const autocompleteData: AutocompleteResponse = await autocompleteResponse.json()
+              let autocompleteData: AutocompleteResponse | null = null
+              let matchedProduct: any = null
+              let commerceToolsStock = 0
 
-              const matchedProduct = autocompleteData.products.find(p => p.variant && p.variant.sku === psid)
-              const commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
+              try {
+                const autocompleteResponse = await fetch(autocompleteUrl)
+                if (!autocompleteResponse.ok) {
+                  throw new Error(`Autocomplete API returned status ${autocompleteResponse.status}`)
+                }
+                const rawText = await autocompleteResponse.text()
+                try {
+                  autocompleteData = JSON.parse(rawText)
+                } catch (jsonError) {
+                  console.error(`Autocomplete JSON parsing failed for ${psid}. First 200 chars:`, rawText.substring(0, 200))
+                  throw new Error(`Autocomplete returned invalid JSON for ${psid}: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`)
+                }
+
+                matchedProduct = autocompleteData.products.find(p => p.variant && p.variant.sku === psid)
+                commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
+              } catch (error) {
+                console.error(`Autocomplete error for ${psid}:`, error)
+                sendEvent('error', { message: `Autocomplete API failed for ${psid}: ${error instanceof Error ? error.message : String(error)}` })
+                // Continue processing with 0 stock
+              }
 
               // Get product details from Google Feed
               const googleProduct = googleProductMap.get(psid)

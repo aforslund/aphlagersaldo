@@ -18,6 +18,7 @@ export default function StockCheckerPage() {
   const [nyceCsvData, setNyceCsvData] = useState<any>(null)
   const [summaryStats, setSummaryStats] = useState<any>(null)
   const [sortBy, setSortBy] = useState<'none' | 'nyce' | 'fluent' | 'ct'>('none')
+  const [nyceUnallocatedFilter, setNyceUnallocatedFilter] = useState<number>(0)  // 0 means no filter
   const router = useRouter()
 
   const handlePsidFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -198,7 +199,16 @@ export default function StockCheckerPage() {
   }
 
   const okResults = getSortedResults(results.filter(r => r.status === 'ok'))
-  const issueResults = getSortedResults(results.filter(r => r.status === 'issue' || r.status === 'warning'))
+  let issueResults = getSortedResults(results.filter(r => r.status === 'issue' || r.status === 'warning'))
+
+  // Apply NYCE unallocated filter
+  if (nyceUnallocatedFilter > 0) {
+    issueResults = issueResults.filter(r => {
+      if (!r.nyceStock) return false
+      const nyceUnallocated = r.nyceStock.onHandQty - r.nyceStock.inOrderQty
+      return nyceUnallocated >= nyceUnallocatedFilter
+    })
+  }
 
   // Group issue results by analysis type
   const groupedIssues = issueResults.reduce((groups, result) => {
@@ -530,69 +540,137 @@ export default function StockCheckerPage() {
                 </div>
               </div>
 
-              {/* Sorting Controls */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Sort by:</span>
-                <button
-                  onClick={() => setSortBy('none')}
-                  style={{
-                    padding: '0.25rem 0.75rem',
-                    background: sortBy === 'none' ? '#667eea' : 'white',
-                    color: sortBy === 'none' ? 'white' : '#374151',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '4px',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: sortBy === 'none' ? '600' : '400'
-                  }}
-                >
-                  Default
-                </button>
-                <button
-                  onClick={() => setSortBy('nyce')}
-                  style={{
-                    padding: '0.25rem 0.75rem',
-                    background: sortBy === 'nyce' ? '#667eea' : 'white',
-                    color: sortBy === 'nyce' ? 'white' : '#374151',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '4px',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: sortBy === 'nyce' ? '600' : '400'
-                  }}
-                >
-                  NYCE ↓
-                </button>
-                <button
-                  onClick={() => setSortBy('fluent')}
-                  style={{
-                    padding: '0.25rem 0.75rem',
-                    background: sortBy === 'fluent' ? '#667eea' : 'white',
-                    color: sortBy === 'fluent' ? 'white' : '#374151',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '4px',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: sortBy === 'fluent' ? '600' : '400'
-                  }}
-                >
-                  Fluent ↓
-                </button>
-                <button
-                  onClick={() => setSortBy('ct')}
-                  style={{
-                    padding: '0.25rem 0.75rem',
-                    background: sortBy === 'ct' ? '#667eea' : 'white',
-                    color: sortBy === 'ct' ? 'white' : '#374151',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '4px',
-                    fontSize: '0.75rem',
-                    cursor: 'pointer',
-                    fontWeight: sortBy === 'ct' ? '600' : '400'
-                  }}
-                >
-                  CT ↓
-                </button>
+              {/* Sorting and Filtering Controls */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                {/* Sort Controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>Sort by:</span>
+                  <button
+                    onClick={() => setSortBy('none')}
+                    style={{
+                      padding: '0.25rem 0.75rem',
+                      background: sortBy === 'none' ? '#667eea' : 'white',
+                      color: sortBy === 'none' ? 'white' : '#374151',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      fontWeight: sortBy === 'none' ? '600' : '400'
+                    }}
+                  >
+                    Default
+                  </button>
+                  <button
+                    onClick={() => setSortBy('nyce')}
+                    style={{
+                      padding: '0.25rem 0.75rem',
+                      background: sortBy === 'nyce' ? '#667eea' : 'white',
+                      color: sortBy === 'nyce' ? 'white' : '#374151',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      fontWeight: sortBy === 'nyce' ? '600' : '400'
+                    }}
+                  >
+                    NYCE ↓
+                  </button>
+                  <button
+                    onClick={() => setSortBy('fluent')}
+                    style={{
+                      padding: '0.25rem 0.75rem',
+                      background: sortBy === 'fluent' ? '#667eea' : 'white',
+                      color: sortBy === 'fluent' ? 'white' : '#374151',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      fontWeight: sortBy === 'fluent' ? '600' : '400'
+                    }}
+                  >
+                    Fluent ↓
+                  </button>
+                  <button
+                    onClick={() => setSortBy('ct')}
+                    style={{
+                      padding: '0.25rem 0.75rem',
+                      background: sortBy === 'ct' ? '#667eea' : 'white',
+                      color: sortBy === 'ct' ? 'white' : '#374151',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      fontWeight: sortBy === 'ct' ? '600' : '400'
+                    }}
+                  >
+                    CT ↓
+                  </button>
+                </div>
+
+                {/* NYCE Unallocated Filter */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', borderLeft: '1px solid #d1d5db', paddingLeft: '1rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>NYCE unallocated ≥</span>
+                  <button
+                    onClick={() => setNyceUnallocatedFilter(0)}
+                    style={{
+                      padding: '0.25rem 0.75rem',
+                      background: nyceUnallocatedFilter === 0 ? '#10b981' : 'white',
+                      color: nyceUnallocatedFilter === 0 ? 'white' : '#374151',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      fontWeight: nyceUnallocatedFilter === 0 ? '600' : '400'
+                    }}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => setNyceUnallocatedFilter(1)}
+                    style={{
+                      padding: '0.25rem 0.75rem',
+                      background: nyceUnallocatedFilter === 1 ? '#10b981' : 'white',
+                      color: nyceUnallocatedFilter === 1 ? 'white' : '#374151',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      fontWeight: nyceUnallocatedFilter === 1 ? '600' : '400'
+                    }}
+                  >
+                    1+
+                  </button>
+                  <button
+                    onClick={() => setNyceUnallocatedFilter(2)}
+                    style={{
+                      padding: '0.25rem 0.75rem',
+                      background: nyceUnallocatedFilter === 2 ? '#10b981' : 'white',
+                      color: nyceUnallocatedFilter === 2 ? 'white' : '#374151',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      fontWeight: nyceUnallocatedFilter === 2 ? '600' : '400'
+                    }}
+                  >
+                    2+
+                  </button>
+                  <button
+                    onClick={() => setNyceUnallocatedFilter(5)}
+                    style={{
+                      padding: '0.25rem 0.75rem',
+                      background: nyceUnallocatedFilter === 5 ? '#10b981' : 'white',
+                      color: nyceUnallocatedFilter === 5 ? 'white' : '#374151',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px',
+                      fontSize: '0.75rem',
+                      cursor: 'pointer',
+                      fontWeight: nyceUnallocatedFilter === 5 ? '600' : '400'
+                    }}
+                  >
+                    5+
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -657,7 +735,7 @@ export default function StockCheckerPage() {
 }
 
 function IssueGroup({ category, items }: { category: string, items: ProductStockResult[] }) {
-  const [isExpanded, setIsExpanded] = useState(true)
+  const [isExpanded, setIsExpanded] = useState(false)  // Start collapsed so you can see counts
 
   // Determine color based on category
   const getColorScheme = () => {

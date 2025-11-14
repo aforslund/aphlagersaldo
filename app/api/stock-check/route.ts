@@ -258,10 +258,11 @@ function analyzeStockFull(
     details.push('Action: Check if stock is available for digital sales in NYCE')
   }
   else if (commerceToolsStock === 0 && fluentStock === 0 && nyceUnallocated === 0) {
-    analysis = 'EJ INLEVERAT? (Not delivered?)'
-    details.push('No stock in any system')
-    details.push('Product may not have been delivered to warehouse yet')
-    details.push('Action: Check delivery status and inbound shipments')
+    analysis = 'EJ INLEVERAT - DATA OK (Not delivered - data consistent)'
+    status = 'ok'  // This is actually OK - all systems agree there's no stock
+    details.push('All systems correctly show 0 stock')
+    details.push('Product may not have been delivered to warehouse yet, but data is consistent')
+    details.push('Note: Purchasing should verify if delivery is expected')
   }
   else {
     analysis = 'INVESTIGATE - Stock pattern not matching standard scenarios'
