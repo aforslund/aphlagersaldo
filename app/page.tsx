@@ -19,7 +19,20 @@ export default function StockCheckerPage() {
   const [summaryStats, setSummaryStats] = useState<any>(null)
   const [sortBy, setSortBy] = useState<'none' | 'nyce' | 'fluent' | 'ct'>('none')
   const [nyceUnallocatedFilter, setNyceUnallocatedFilter] = useState<number>(0)  // 0 means no filter
+  const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'success' | 'error' | 'info' }>>([])
   const router = useRouter()
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Date.now()
+    setToasts(prev => [...prev, { id, message, type }])
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id))
+    }, 5000) // Auto-dismiss after 5 seconds
+  }
+
+  const dismissToast = (id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id))
+  }
 
   const handlePsidFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -84,7 +97,7 @@ export default function StockCheckerPage() {
     try {
       // Validate Full Check mode requires NYCE CSV
       if (checkMode === 'full' && !nyceCsvData) {
-        alert('Full Check mode requires NYCE CSV upload')
+        showToast('Full Check mode requires NYCE CSV upload', 'error')
         setLoading(false)
         return
       }
@@ -102,7 +115,7 @@ export default function StockCheckerPage() {
           .filter(p => p.length > 0)
 
         if (psidList.length === 0) {
-          alert('Please enter at least one PSID for Spot-check mode')
+          showToast('Please enter at least one PSID for Spot-check mode', 'error')
           setLoading(false)
           return
         }
@@ -167,7 +180,7 @@ export default function StockCheckerPage() {
       console.error('Stock check error:', error)
       const errorMessage = error instanceof Error ? error.message : String(error)
       setErrors(prev => [...prev, `Error checking stock: ${errorMessage}`])
-      alert('Error checking stock: ' + errorMessage)
+      showToast(`Error checking stock: ${errorMessage}`, 'error')
     } finally {
       setLoading(false)
       setProgressMessage('')
@@ -729,6 +742,69 @@ export default function StockCheckerPage() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Toast Notifications */}
+      <div style={{
+        position: 'fixed',
+        top: '1rem',
+        right: '1rem',
+        zIndex: 9999,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.5rem',
+        maxWidth: '400px'
+      }}>
+        {toasts.map(toast => (
+          <div
+            key={toast.id}
+            style={{
+              background: toast.type === 'error' ? '#fee2e2' : toast.type === 'success' ? '#d1fae5' : '#dbeafe',
+              border: `2px solid ${toast.type === 'error' ? '#ef4444' : toast.type === 'success' ? '#10b981' : '#3b82f6'}`,
+              borderRadius: '8px',
+              padding: '1rem',
+              boxShadow: '0 10px 15px rgba(0,0,0,0.1)',
+              display: 'flex',
+              alignItems: 'start',
+              justifyContent: 'space-between',
+              animation: 'slideIn 0.3s ease-out',
+              minWidth: '300px'
+            }}
+          >
+            <div style={{ flex: 1, display: 'flex', alignItems: 'start', gap: '0.75rem' }}>
+              <span style={{ fontSize: '1.25rem' }}>
+                {toast.type === 'error' ? '❌' : toast.type === 'success' ? '✅' : 'ℹ️'}
+              </span>
+              <p style={{
+                margin: 0,
+                color: toast.type === 'error' ? '#991b1b' : toast.type === 'success' ? '#065f46' : '#1e40af',
+                fontSize: '0.875rem',
+                lineHeight: '1.4',
+                wordBreak: 'break-word'
+              }}>
+                {toast.message}
+              </p>
+            </div>
+            <button
+              onClick={() => dismissToast(toast.id)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '1.25rem',
+                color: toast.type === 'error' ? '#991b1b' : toast.type === 'success' ? '#065f46' : '#1e40af',
+                padding: 0,
+                marginLeft: '0.5rem',
+                lineHeight: 1,
+                opacity: 0.5
+              }}
+              onMouseOver={(e) => e.currentTarget.style.opacity = '1'}
+              onMouseOut={(e) => e.currentTarget.style.opacity = '0.5'}
+            >
+              ×
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   )
