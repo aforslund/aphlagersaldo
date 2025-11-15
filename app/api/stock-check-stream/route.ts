@@ -480,8 +480,10 @@ export async function POST(request: NextRequest) {
                   throw new Error(`Autocomplete returned invalid JSON for ${psid}: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`)
                 }
 
-                matchedProduct = autocompleteData.products.find(p => p.variant && p.variant.sku === psid)
-                commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
+                if (autocompleteData) {
+                  matchedProduct = autocompleteData.products.find(p => p.variant && p.variant.sku === psid)
+                  commerceToolsStock = matchedProduct?.variant?.inventoryQuantity || 0
+                }
               } catch (error) {
                 console.error(`Autocomplete error for ${psid}:`, error)
                 sendEvent('error', { message: `Autocomplete API failed for ${psid}: ${error instanceof Error ? error.message : String(error)}` })
