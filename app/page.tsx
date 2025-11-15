@@ -34,6 +34,60 @@ export default function StockCheckerPage() {
     setToasts(prev => prev.filter(t => t.id !== id))
   }
 
+  const exportToExcel = () => {
+    // Create CSV content
+    const headers = [
+      'PSID',
+      'Product Name',
+      'URL',
+      'Status',
+      'Analysis',
+      'Google Sellable',
+      'CT Stock',
+      'Fluent Stock',
+      'NYCE OnHand',
+      'NYCE InOrder',
+      'NYCE Unallocated',
+      'Details'
+    ]
+
+    const rows = results.map(r => {
+      const nyceUnallocated = r.nyceStock ? (r.nyceStock.onHandQty - r.nyceStock.inOrderQty) : 0
+      return [
+        r.psid,
+        `"${r.productName.replace(/"/g, '""')}"`, // Escape quotes
+        r.productUrl || '',
+        r.status.toUpperCase(),
+        `"${r.analysis.replace(/"/g, '""')}"`,
+        r.googleSellable === null ? '' : (r.googleSellable ? 'Sellable' : 'Not Sellable'),
+        r.commerceToolsStock,
+        r.fluentStock,
+        r.nyceStock?.onHandQty || 0,
+        r.nyceStock?.inOrderQty || 0,
+        nyceUnallocated,
+        `"${r.details.join('; ').replace(/"/g, '""')}"` // Join details with semicolon
+      ]
+    })
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n')
+
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `stock-check-${new Date().toISOString().split('T')[0]}.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    showToast(`✅ Exported ${results.length} items to Excel`, 'success')
+  }
+
   const handlePsidFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -551,9 +605,11 @@ export default function StockCheckerPage() {
               marginBottom: '1rem',
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'center'
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '1rem'
             }}>
-              <div style={{ display: 'flex', gap: '2rem' }}>
+              <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
                 <div>
                   <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>Total Checked:</span>
                   <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem' }}>{results.length}</span>
@@ -566,6 +622,28 @@ export default function StockCheckerPage() {
                   <span style={{ fontSize: '0.875rem', color: '#ef4444' }}>Issues:</span>
                   <span style={{ fontSize: '1.5rem', fontWeight: 'bold', marginLeft: '0.5rem', color: '#ef4444' }}>{issueResults.length}</span>
                 </div>
+                <button
+                  onClick={exportToExcel}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    background: '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '6px',
+                    fontSize: '0.875rem',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                  }}
+                  onMouseOver={(e) => e.currentTarget.style.background = '#059669'}
+                  onMouseOut={(e) => e.currentTarget.style.background = '#10b981'}
+                >
+                  <span style={{ fontSize: '1.125rem' }}>📊</span>
+                  Export to Excel
+                </button>
               </div>
 
               {/* Sorting and Filtering Controls */}
