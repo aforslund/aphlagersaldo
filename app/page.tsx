@@ -143,34 +143,49 @@ export default function StockCheckerPage() {
       const decoder = new TextDecoder()
       const tempResults: ProductStockResult[] = []
       const tempErrors: string[] = []
+      let buffer = '' // Buffer for incomplete chunks
 
       if (reader) {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
 
-          const chunk = decoder.decode(value)
-          const lines = chunk.split('\n')
+          // Append to buffer to handle partial chunks
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+
+          // Keep the last incomplete line in the buffer
+          buffer = lines.pop() || ''
 
           for (const line of lines) {
             if (line.startsWith('data: ')) {
-              const data = JSON.parse(line.slice(6))
+              const jsonStr = line.slice(6).trim()
+              if (!jsonStr) continue // Skip empty data lines
 
-              if (data.type === 'progress') {
-                setProgressMessage(data.message)
-                if (data.current !== undefined) setProgressCurrent(data.current)
-                if (data.total !== undefined) setProgressTotal(data.total)
-              } else if (data.type === 'result') {
-                tempResults.push(data.result)
-                setResults([...tempResults])
-              } else if (data.type === 'error') {
-                tempErrors.push(data.message)
+              try {
+                const data = JSON.parse(jsonStr)
+
+                if (data.type === 'progress') {
+                  setProgressMessage(data.message)
+                  if (data.current !== undefined) setProgressCurrent(data.current)
+                  if (data.total !== undefined) setProgressTotal(data.total)
+                } else if (data.type === 'result') {
+                  tempResults.push(data.result)
+                  setResults([...tempResults])
+                } else if (data.type === 'error') {
+                  tempErrors.push(data.message)
+                  setErrors([...tempErrors])
+                } else if (data.type === 'summary') {
+                  setSummaryStats(data)
+                } else if (data.type === 'complete') {
+                  setResults(data.results)
+                  setErrors(data.errors)
+                }
+              } catch (parseError) {
+                console.error('Failed to parse SSE data:', jsonStr)
+                console.error('Parse error:', parseError)
+                tempErrors.push(`Stream parsing error: ${parseError instanceof Error ? parseError.message : String(parseError)}`)
                 setErrors([...tempErrors])
-              } else if (data.type === 'summary') {
-                setSummaryStats(data)
-              } else if (data.type === 'complete') {
-                setResults(data.results)
-                setErrors(data.errors)
               }
             }
           }
