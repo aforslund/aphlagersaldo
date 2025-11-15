@@ -54,7 +54,7 @@ export default function StockCheckerPage() {
         setPsids(psidList.join(', '))
       },
       error: (error) => {
-        alert('Error parsing CSV: ' + error.message)
+        showToast('Error parsing CSV: ' + error.message, 'error')
       },
     })
   }
@@ -76,10 +76,10 @@ export default function StockCheckerPage() {
           }
         })
         setNyceCsvData(nyceData)
-        alert(`Loaded NYCE data for ${Object.keys(nyceData).length} SKUs`)
+        showToast(`✅ Loaded NYCE data for ${Object.keys(nyceData).length} SKUs`, 'success')
       },
       error: (error) => {
-        alert('Error parsing NYCE CSV: ' + error.message)
+        showToast('Error parsing NYCE CSV: ' + error.message, 'error')
       },
     })
   }
